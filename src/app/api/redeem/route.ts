@@ -1,109 +1,138 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 
-export async function POST(request: NextRequest) {
+export async function POST(req: NextRequest) {
   try {
-    const { mobile, code, deviceId } = await request.json();
+    const { code } = await req.json();
 
-    // 验证输入
-    if (!mobile || !code || !deviceId) {
+    if (!code || typeof code !== 'string') {
       return NextResponse.json(
-        { error: '缺少必要参数' },
+        { error: '请输入有效的卡密' },
         { status: 400 }
       );
     }
 
+    // 获取当前用户
     const supabase = await createClient();
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
 
-    // 检查卡密是否存在且未使用
-    const { data: redeemCode, error: redeemError } = await supabase
+    if (authError || !user) {
+      return NextResponse.json(
+        { error: '请先登录' },
+        { status: 401 }
+      );
+    }
+
+    // 查询卡密信息
+    const { data: redeemCode, error: queryError } = await supabase
       .from('redeem_codes')
       .select('*')
-      .eq('code', code)
+      .eq('code', code.toUpperCase())
       .single();
 
-    if (redeemError || !redeemCode) {
+    if (queryError || !redeemCode) {
       return NextResponse.json(
-        { error: '卡密不存在或已失效' },
+        { error: '卡密不存在或已过期' },
         { status: 404 }
       );
     }
 
-    if (redeemCode.used) {
+    // 检查是否已使用
+    if (redeemCode.is_used) {
       return NextResponse.json(
-        { error: '卡密已被使用' },
+        { error: '该卡密已被使用' },
         { status: 400 }
       );
     }
 
-    // 检查该设备是否已使用过此卡密
-    const { data: existingLicense } = await supabase
-      .from('license_keys')
+    // 获取或创建用户档案
+    let { data: userProfile, error: profileError } = await supabase
+      .from('profiles')
       .select('*')
-      .eq('device_id', deviceId)
-      .eq('code', code)
-      .single();
+      .eq('id', user.id)
+      .maybeSingle();
 
-    if (existingLicense) {
-      return NextResponse.json(
-        { error: '该设备已使用过此卡密' },
-        { status: 400 }
-      );
+    // 如果档案不存在（新用户），则创建一个
+    if (!userProfile) {
+      const { data: newProfile, error: createError } = await supabase
+        .from('profiles')
+        .insert([{ 
+          id: user.id, 
+          phone: user.phone || '',
+          membership_level: 'free',
+          max_daily_usage: 3,
+          daily_usage_count: 0
+        }])
+        .select()
+        .single();
+      
+      if (createError) {
+        console.error('创建用户档案失败:', createError);
+        return NextResponse.json({ error: '初始化用户信息失败' }, { status: 500 });
+      }
+      userProfile = newProfile;
     }
 
-    // 计算过期时间
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + redeemCode.validity_days * 24 * 60 * 60 * 1000);
+    // 计算新的过期时间
+    const currentExpiry = userProfile.membership_expire_at
+      ? new Date(userProfile.membership_expire_at)
+      : new Date();
+    
+    // 确保即使当前已过期，也从现在开始累加
+    const baseDate = currentExpiry > new Date() ? currentExpiry : new Date();
+    const newExpiry = new Date(baseDate);
+    
+    // 修复：使用数据库中实际的字段名 'days'
+    newExpiry.setDate(newExpiry.getDate() + (redeemCode.days || 30));
 
-    // 创建 license_keys 记录
-    const { error: licenseError } = await supabase
-      .from('license_keys')
-      .insert({
-        device_id: deviceId,
-        code,
-        mobile,
-        membership_level: redeemCode.membership_level,
-        expires_at: expiresAt.toISOString(),
-      });
+    // 更新用户会员信息
+    const { error: updateError } = await supabase
+      .from('profiles')
+      .update({
+        membership_level: 'premium',
+        membership_expire_at: newExpiry.toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', user.id);
 
-    if (licenseError) {
-      console.error('创建 license_keys 记录失败:', licenseError);
+    if (updateError) {
       return NextResponse.json(
-        { error: '激活失败，请稍后重试' },
+        { error: '更新会员信息失败' },
         { status: 500 }
       );
     }
 
-    // 更新 redeem_codes 为已使用
-    const { error: updateError } = await supabase
+    // 标记卡密为已使用
+    const { error: markError } = await supabase
       .from('redeem_codes')
       .update({
-        used: true,
-        used_at: now.toISOString(),
+        is_used: true,
+        used_by: user.id,
+        used_at: new Date().toISOString(),
       })
-      .eq('code', code);
+      .eq('code', code.toUpperCase());
 
-    if (updateError) {
-      console.error('更新 redeem_codes 失败:', updateError);
+    if (markError) {
+      console.error('标记卡密失败:', markError);
+      // 即使标记失败也返回成功，因为已更新了会员信息
     }
 
-    // 将激活信息存储到 localStorage（通过响应体返回）
     return NextResponse.json(
       {
         success: true,
-        message: '激活成功！',
-        license: {
-          membership_level: redeemCode.membership_level,
-          expires_at: expiresAt.toISOString(),
-          validity_days: redeemCode.validity_days,
-        },
+        message: `恭喜！您已成功兑换会员，有效期至 ${newExpiry.toLocaleDateString()}`,
+        expiry: newExpiry.toISOString(),
+        membershipLevel: 'premium',
       },
       { status: 200 }
     );
-  } catch (error: any) {
-    console.error('API 错误:', error);
+  } catch (error) {
+    console.error('兑换码处理失败:', error);
     return NextResponse.json(
-      { error: error.message || '服务器错误' },
+      { error: '处理失败，请稍后重试' },
       { status: 500 }
     );
   }

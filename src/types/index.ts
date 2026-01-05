@@ -44,7 +44,6 @@ export interface GenerationRecord {
 export interface UserProfile {
   id: string;
   phone: string;
-  mobile?: string;
   membership_level: 'free' | 'premium' | 'enterprise';
   membership_expire_at: string;
   daily_usage_count: number;
@@ -60,23 +59,4 @@ export interface RedeemCode {
   used_by: string | null;
   used_at: string | null;
   created_at: string;
-}
-
-// 许可证类型
-export interface LicenseKey {
-  id: string;
-  device_id: string;
-  code: string;
-  mobile: string;
-  activated_at: string;
-  membership_level: 'premium' | 'enterprise';
-  expires_at: string;
-  created_at: string;
-}
-
-// 成员激活数据
-export interface MemberActivationData {
-  mobile: string;
-  licenseKey: string;
-  deviceId: string;
 }

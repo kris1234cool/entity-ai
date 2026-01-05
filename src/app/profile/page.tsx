@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -9,8 +9,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { useAuth } from '@/components/auth/AuthWrapper';
 import { useProject } from '@/contexts/ProjectContext';
 import { ShopProfile } from '@/types';
-import { Trash2, Plus, Check } from 'lucide-react';
+import { Trash2, Plus, Check, LogIn } from 'lucide-react';
 import MembershipCard from '@/components/MembershipCard';
+import { getLicenseInfo, getTodayGenerationCount } from '@/lib/device-utils';
+import { useRouter } from 'next/navigation';
 
 export default function ProfilePage() {
   const { user, profile, signOut } = useAuth();
@@ -25,6 +27,14 @@ export default function ProfilePage() {
     boss_persona: '',
   });
   const [loading, setLoading] = useState(false);
+  const [licenseInfo, setLicenseInfo] = useState<any>(null);
+  const router = useRouter();
+
+  // 获取本地许可证信息
+  useEffect(() => {
+    const info = getLicenseInfo();
+    setLicenseInfo(info);
+  }, [refreshKey]);
 
   const handleFormChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -81,12 +91,84 @@ export default function ProfilePage() {
     }
   };
 
+  // 未登录用户显示简化版本（可以兑换卡密）
   if (!user) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-slate-400">请先登录</p>
-        </div>
+      <div className="pb-8 space-y-6">
+        {/* Header */}
+        <header className="sticky top-0 z-10 bg-white/60 backdrop-blur-xl border-b border-white/40 p-4">
+          <h1 className="text-xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+            我的
+          </h1>
+        </header>
+
+        <main className="px-6 space-y-8">
+          {/* 会员卡 - 未登录用户也可以兑换卡密 */}
+          <MembershipCard 
+            profile={null} 
+            onRedeemSuccess={() => {
+              setRefreshKey(prev => prev + 1);
+            }}
+          />
+
+          {/* 本地许可证信息 */}
+          {licenseInfo && (
+            <section>
+              <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wider mb-3">激活信息</h2>
+              <div className="bg-white/40 backdrop-blur-xl border border-white/60 rounded-3xl p-4 space-y-3">
+                <div>
+                  <Label className="text-xs text-slate-600">会员等级</Label>
+                  <p className="text-slate-800 font-medium">
+                    {licenseInfo.membershipLevel === 'premium' ? '高级会员' : '企业会员'}
+                  </p>
+                </div>
+                <div>
+                  <Label className="text-xs text-slate-600">有效期至</Label>
+                  <p className="text-slate-800 font-medium">
+                    {new Date(licenseInfo.expiresAt).toLocaleDateString('zh-CN')}
+                  </p>
+                </div>
+                {licenseInfo.mobile && (
+                  <div>
+                    <Label className="text-xs text-slate-600">手机号</Label>
+                    <p className="text-slate-800 font-medium">{licenseInfo.mobile}</p>
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
+
+          {/* 使用统计 */}
+          <section>
+            <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wider mb-3">使用情况</h2>
+            <div className="bg-white/40 backdrop-blur-xl border border-white/60 rounded-3xl p-4 space-y-3">
+              <div>
+                <Label className="text-xs text-slate-600">今日已生成</Label>
+                <p className="text-slate-800 font-medium">{getTodayGenerationCount()} 次</p>
+              </div>
+              <div>
+                <Label className="text-xs text-slate-600">免费额度</Label>
+                <p className="text-slate-800 font-medium">
+                  {licenseInfo ? '无限' : `${getTodayGenerationCount()}/5 次`}
+                </p>
+              </div>
+            </div>
+          </section>
+
+          {/* 登录按钮 */}
+          <div className="pt-4 border-t border-white/40">
+            <Button
+              onClick={() => router.push('/login')}
+              className="w-full bg-gradient-to-br from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white rounded-2xl py-3 flex items-center justify-center gap-2"
+            >
+              <LogIn className="w-4 h-4" />
+              登录账号
+            </Button>
+            <p className="text-xs text-slate-500 text-center mt-2">
+              登录后可保存店铺档案，多设备同步
+            </p>
+          </div>
+        </main>
       </div>
     );
   }

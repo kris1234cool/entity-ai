@@ -10,8 +10,6 @@ import { Send, Sparkles, X, ChevronLeft, MoreHorizontal, AlertCircle } from 'luc
 import { ScriptType, ConversionGoal, ScriptResult } from '@/types';
 import { getAgentConfig, CONVERSION_GOALS } from '@/lib/agent-config';
 import ScriptCard from './ScriptCard';
-import { getOrCreateDeviceId, getTodayGenerationCount, incrementGenerationCount } from '@/lib/device-utils';
-import MemberActivationModal from './MemberActivationModal';
 
 interface Message {
   role: 'ai' | 'user';
@@ -38,15 +36,7 @@ export default function AgentChatDialog({
   const [conversionGoal, setConversionGoal] = useState<ConversionGoal>('涨粉');
   const [isGenerating, setIsGenerating] = useState(false);
   const [showGoalSelector, setShowGoalSelector] = useState(true);
-  const [deviceId, setDeviceId] = useState('');
-  const [showActivationModal, setShowActivationModal] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  // 初始化设备 ID
-  useEffect(() => {
-    const id = getOrCreateDeviceId();
-    setDeviceId(id);
-  }, []);
 
   // 初始化对话 - 显示 AI 开场白
   useEffect(() => {
@@ -87,26 +77,17 @@ export default function AgentChatDialog({
     setShowGoalSelector(false);
 
     try {
-      // 调用 API 生成脚本，传递 deviceId 和当前生成计数
-      const currentGenerationCount = getTodayGenerationCount();
-      const headers: any = {
-        'Content-Type': 'application/json',
-      };
-      
-      // 为未认证用户传递生成计数
-      if (deviceId && currentGenerationCount > 0) {
-        headers['x-generation-count'] = currentGenerationCount.toString();
-      }
-
+      // 调用 API 生成脚本
       const response = await fetch('/api/generate', {
         method: 'POST',
-        headers,
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({
           scriptType,
           conversionGoal,
           topic: userInput,
           shopProfile,
-          deviceId,
         }),
       });
 
@@ -122,18 +103,14 @@ export default function AgentChatDialog({
 
 ${data.message}
 
-输入卡密可立即激活为会员，享受无限生成次数！`
+请点击「我的」页面的「兑换会员」升级为 VIP 会员获得无限生成权限！`
           };
           setMessages(prev => [...prev, errorMessage]);
-          setShowActivationModal(true);
         } else {
           throw new Error(data.error || `生成失败: ${response.statusText}`);
         }
         return;
       }
-
-      // 成功执行，增加生成计数
-      incrementGenerationCount();
 
       const result: ScriptResult = data;
 
@@ -151,7 +128,7 @@ ${data.message}
       // 添加错误消息
       const errorMessage: Message = {
         role: 'ai',
-        content: '😅 抱歉，生成脚本时遇到了问题。请稍后再试，或者改个方式描述你的需求。'
+        content: '😅 抱歉，生成脚本时遇到了问题。请稍后再试，或者换个方式描述你的需求。'
       };
       
       setMessages(prev => [...prev, errorMessage]);
@@ -168,8 +145,7 @@ ${data.message}
   };
 
   return (
-    <>
-      <Dialog open={isOpen} onOpenChange={onClose}>
+    <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent 
         className="fixed top-0 left-0 translate-x-0 translate-y-0 w-full h-[100dvh] m-0 p-0 rounded-none border-none bg-slate-50 flex flex-col shadow-none max-w-none z-[100] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:slide-in-from-right data-[state=closed]:slide-out-to-right data-[state=open]:zoom-in-100 data-[state=closed]:zoom-out-100 duration-300 ease-in-out"
         onOpenAutoFocus={(e) => e.preventDefault()}
@@ -318,35 +294,6 @@ ${data.message}
           </div>
         </div>
       </DialogContent>
-      </Dialog>
-
-      {/* 成员激活 Modal */}
-      <MemberActivationModal
-        isOpen={showActivationModal}
-        onClose={() => setShowActivationModal(false)}
-        onActivate={async (mobile: string, licenseKey: string) => {
-          const response = await fetch('/api/redeem', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              mobile,
-              code: licenseKey,
-              deviceId,
-            }),
-          });
-  
-          const data = await response.json();
-          if (!response.ok) {
-            throw new Error(data.error || '激活失败');
-          }
-  
-          // 激活成功，关闭modal，继续使用
-          setShowActivationModal(false);
-        }}
-        deviceId={deviceId}
-      />
-    </>
+    </Dialog>
   );
 }
