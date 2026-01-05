@@ -4,6 +4,7 @@
 CREATE TABLE IF NOT EXISTS profiles (
   id UUID REFERENCES auth.users(id) PRIMARY KEY,
   phone TEXT UNIQUE NOT NULL,
+  mobile TEXT,
   membership_level TEXT DEFAULT 'free' CHECK (membership_level IN ('free', 'premium', 'enterprise')),
   membership_expire_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   daily_usage_count INTEGER DEFAULT 0,
@@ -49,11 +50,24 @@ CREATE TABLE IF NOT EXISTS redeem_codes (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- 创建 license_keys 表 - 存储设备激活的卡密
+CREATE TABLE IF NOT EXISTS license_keys (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  device_id TEXT NOT NULL,
+  code TEXT NOT NULL REFERENCES redeem_codes(code),
+  mobile TEXT NOT NULL,
+  activated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  membership_level TEXT NOT NULL CHECK (membership_level IN ('premium', 'enterprise')),
+  expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 -- 启用 Row Level Security (RLS)
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
 ALTER TABLE generations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE redeem_codes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE license_keys ENABLE ROW LEVEL SECURITY;
 
 -- 创建 RLS 策略
 CREATE POLICY "Users can view own profile" ON profiles
@@ -79,6 +93,12 @@ CREATE POLICY "Users can insert own generations" ON generations
 
 CREATE POLICY "Users can view own redeem_codes" ON redeem_codes
   FOR SELECT USING (auth.uid() = used_by);
+
+CREATE POLICY "Anyone can view non-used license_keys" ON license_keys
+  FOR SELECT USING (NOT used OR auth.uid() = used_by);
+
+CREATE POLICY "Anyone can insert license_keys" ON license_keys
+  FOR INSERT WITH CHECK (true);
 
 -- 创建更新时间触发器函数
 CREATE OR REPLACE FUNCTION update_updated_at_column()

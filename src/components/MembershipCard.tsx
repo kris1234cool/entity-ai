@@ -1,11 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { UserProfile } from '@/types';
 import { Crown, Zap } from 'lucide-react';
+import { getOrCreateDeviceId, saveLicenseInfo } from '@/lib/device-utils';
 
 interface MembershipCardProps {
   profile: UserProfile | null;
@@ -14,20 +15,33 @@ interface MembershipCardProps {
 
 export default function MembershipCard({ profile, onRedeemSuccess }: MembershipCardProps) {
   const [redeemCode, setRedeemCode] = useState('');
+  const [mobile, setMobile] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [isOpen, setIsOpen] = useState(false);
+  const [deviceId, setDeviceId] = useState('');
 
-  const isMember = profile?.membership_level === 'premium';
+  useEffect(() => {
+    const id = getOrCreateDeviceId();
+    setDeviceId(id);
+  }, []);
+
+  const isMember = profile?.membership_level === 'premium' || profile?.membership_level === 'enterprise';
   const expiryDate = profile?.membership_expire_at
     ? new Date(profile.membership_expire_at)
     : null;
   const isExpired = expiryDate && expiryDate < new Date();
 
   const handleRedeem = async () => {
+    // 验证输入
     if (!redeemCode.trim()) {
       setError('请输入卡密');
+      return;
+    }
+
+    if (mobile && (mobile.length !== 11 || !/^\d+$/.test(mobile))) {
+      setError('请输入正确的 11 位手机号');
       return;
     }
 
@@ -39,7 +53,11 @@ export default function MembershipCard({ profile, onRedeemSuccess }: MembershipC
       const response = await fetch('/api/redeem', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: redeemCode }),
+        body: JSON.stringify({ 
+          code: redeemCode,
+          mobile: mobile || profile?.phone?.replace(/^\+86/, '') || '',
+          deviceId,
+        }),
       });
 
       const data = await response.json();
@@ -49,7 +67,17 @@ export default function MembershipCard({ profile, onRedeemSuccess }: MembershipC
         return;
       }
 
-      setSuccess(data.message);
+      // 如果是未登录用户，保存到本地存储
+      if (!profile) {
+        saveLicenseInfo({
+          membershipLevel: data.license.membership_level,
+          expiresAt: data.license.expires_at,
+          mobile: mobile || '',
+          code: redeemCode,
+        });
+      }
+
+      setSuccess(data.message || '兑换成功！');
       setRedeemCode('');
       
       // 延迟关闭和回调
@@ -140,7 +168,7 @@ export default function MembershipCard({ profile, onRedeemSuccess }: MembershipC
                     <>
                       <div>
                         <label className="block text-sm font-medium text-slate-700 mb-2">
-                          请输入卡密
+                          卡密
                         </label>
                         <Input
                           value={redeemCode}
@@ -153,6 +181,30 @@ export default function MembershipCard({ profile, onRedeemSuccess }: MembershipC
                           disabled={loading}
                         />
                       </div>
+
+                      {!profile && (
+                        <div>
+                          <label className="block text-sm font-medium text-slate-700 mb-2">
+                            手机号 (可选)
+                          </label>
+                          <div className="flex gap-2">
+                            <div className="flex items-center justify-center bg-slate-100 border border-slate-300 rounded-2xl px-3 text-slate-700 text-sm font-medium">
+                              +86
+                            </div>
+                            <Input
+                              value={mobile}
+                              onChange={(e) => {
+                                setMobile(e.target.value.replace(/[^0-9]/g, ''));
+                                setError('');
+                              }}
+                              placeholder="输入 11 位手机号"
+                              maxLength={11}
+                              className="flex-1 bg-white/80 border-white/40 rounded-2xl text-slate-900 placeholder:text-slate-400"
+                              disabled={loading}
+                            />
+                          </div>
+                        </div>
+                      )}
 
                       <Button
                         onClick={handleRedeem}
