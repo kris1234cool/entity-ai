@@ -1,0 +1,26 @@
+#!/bin/bash
+
+echo "==================================="
+echo "实体店AI文案助手 - 启动指南"
+echo "==================================="
+echo ""
+echo "1. 安装依赖（首次运行）："
+echo "   npm install"
+echo ""
+echo "2. 配置环境变量："
+echo "   编辑 .env.local 文件，填入您的 Supabase 和 DeepSeek API 配置"
+echo ""
+echo "3. 初始化数据库："
+echo "   在 Supabase 控制台执行 supabase-schema.sql 中的 SQL 脚本"
+echo ""
+echo "4. 启动开发服务器："
+echo "   npm run dev"
+echo ""
+echo "5. 访问应用："
+echo "   打开浏览器访问 http://localhost:3000"
+echo ""
+echo "==================================="
+echo "正在启动开发服务器..."
+echo "==================================="
+
+npm run dev
