@@ -28,6 +28,17 @@ export interface ShopProfile {
   boss_persona: string;
 }
 
+// 灵感一闪 - Ideas 返回类型
+export interface AmmoBox {
+  type: string;
+  hooks: string[];
+}
+
+export interface IdeasResult {
+  reply: string;
+  ammo_boxes: AmmoBox[];
+}
+
 // 生成记录类型
 export interface GenerationRecord {
   id?: string;

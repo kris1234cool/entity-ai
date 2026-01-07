@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import OpenAI from 'openai';
-import { SYSTEM_PROMPT, getConversionGoalInstruction, getScriptTypePrompt } from '@/lib/prompts';
-import { ScriptResult } from '@/types';
+import { SYSTEM_PROMPT, getConversionGoalInstruction, getScriptTypePrompt, getXueHuiIdeasPrompt, getXueHuiScriptPrompt } from '@/lib/prompts';
+import { ScriptResult, IdeasResult } from '@/types';
 import { createClient } from '@/utils/supabase/server';
 
 // 配置 OpenAI 客户端，兼容 DeepSeek
@@ -12,28 +12,224 @@ const openai = new OpenAI({
 
 export async function POST(request: NextRequest) {
   try {
-    const { scriptType, conversionGoal, topic, shopProfile } = await request.json();
+    const { scriptType, conversionGoal, topic, shopProfile, step, industry, location, selected_hook } = await request.json();
 
     // 验证请求参数
-    if (!scriptType || !conversionGoal || !topic || !shopProfile) {
+    // ‘流沒一闪争能模式有不同的参数需求
+    if (step === 'ideas') {
+      if (!industry || !location) {
+        return new Response(
+          JSON.stringify({ error: '缺少必要参数: industry, location' }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+    } else if (step === 'script') {
+      if (!selected_hook || !industry || !location) {
+        return new Response(
+          JSON.stringify({ error: '缺少必要参数: selected_hook, industry, location' }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+    } else if (!scriptType || !conversionGoal || !topic || !shopProfile) {
       return new Response(
         JSON.stringify({ error: '缺少必要参数' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
-    // 检查用户会员状态和日限制
+    // 灵感一闪特殊模式处理
+    if (step === 'ideas' || step === 'script') {
+      // 灵感一闪模式：Ideas 和 Script 步骤都计数为生成次数
+      const supabase = await createClient();
+      let userId: string | null = null;
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      
+      if (user && !authError) {
+        userId = user.id;
+      } else if (request.headers.get('x-user-phone')) {
+        const phone = request.headers.get('x-user-phone');
+        userId = `lead_${phone}`;
+      } else {
+        return new Response(
+          JSON.stringify({ error: '请先登录' }),
+          { status: 401, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+
+      const { data: userProfile, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (profileError || !userProfile) {
+        return new Response(
+          JSON.stringify({ error: '获取用户信息失败' }),
+          { status: 500, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+
+      const isMember = userProfile?.membership_level === 'premium';
+      const membershipExpiry = userProfile?.membership_expire_at
+        ? new Date(userProfile.membership_expire_at)
+        : new Date();
+      const isMembershipValid = isMember && membershipExpiry > new Date();
+
+      const DAILY_LIMIT_FREE = 3;
+      const currentUsage = userProfile?.daily_usage_count || 0;
+
+      // 仅在 ideas 步骤时检查和计数限制
+      if (step === 'ideas' && !isMembershipValid && currentUsage >= DAILY_LIMIT_FREE) {
+        return new Response(
+          JSON.stringify({
+            error: '今日生成次数已达上限',
+            message: '您的免费额度已用尽，请升级为 VIP 会员获得无限生成权限',
+            shouldShowUpgradeDialog: true,
+            limit: DAILY_LIMIT_FREE,
+            used: currentUsage,
+          }),
+          { status: 403, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+
+      // 仅在 ideas 步骤时更新计数
+      if (step === 'ideas' && !isMembershipValid) {
+        const newUsageCount = currentUsage + 1;
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        const lastUpdateDate = userProfile?.updated_at
+          ? new Date(userProfile.updated_at)
+          : new Date(0);
+        lastUpdateDate.setHours(0, 0, 0, 0);
+        
+        if (lastUpdateDate.getTime() < today.getTime()) {
+          const { data: existingProfile, error: checkError } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', userId)
+            .maybeSingle();
+            
+          if (checkError) {
+            await supabase
+              .from('profiles')
+              .insert([{
+                id: userId,
+                phone: request.headers.get('x-user-phone') || '',
+                membership_level: 'free',
+                max_daily_usage: 3,
+                daily_usage_count: 1
+              }]);
+          } else {
+            await supabase
+              .from('profiles')
+              .update({ daily_usage_count: 1, updated_at: new Date().toISOString() })
+              .eq('id', userId);
+          }
+        } else if (newUsageCount <= DAILY_LIMIT_FREE) {
+          await supabase
+            .from('profiles')
+            .update({ daily_usage_count: newUsageCount, updated_at: new Date().toISOString() })
+            .eq('id', userId);
+        }
+      }
+
+      // 处理 ideas 步骤
+      if (step === 'ideas') {
+        const ideasSystemPrompt = getXueHuiIdeasPrompt();
+        const ideasUserPrompt = `业务领域: ${industry}\n地理位置: ${location}`;
+
+        const response = await openai.chat.completions.create({
+          model: 'deepseek-chat',
+          messages: [
+            { role: 'system', content: ideasSystemPrompt },
+            { role: 'user', content: ideasUserPrompt },
+          ],
+          temperature: 0.7,
+          max_tokens: 2000,
+          response_format: { type: 'json_object' },
+        });
+
+        const aiResponse = response.choices[0].message?.content;
+
+        if (!aiResponse) {
+          return new Response(
+            JSON.stringify({ error: 'AI 未返回有效内容' }),
+            { status: 500, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+
+        let ideasResult: IdeasResult;
+        try {
+          const jsonMatch = aiResponse.match(/```json\n?([\s\S]*?)\n?```|```([\s\S]*)```|({[\s\S]*})/);
+          const jsonString = (jsonMatch ? (jsonMatch[1] || jsonMatch[2] || jsonMatch[3]) : aiResponse) || '';
+          ideasResult = JSON.parse(jsonString.trim());
+        } catch (parseError) {
+          console.error('JSON 解析错误:', parseError);
+          console.error('AI 响应内容:', aiResponse);
+          return new Response(
+            JSON.stringify({ 
+              error: 'AI 返回格式错误',
+              details: '无法解析 AI 返回的 JSON 格式'
+            }),
+            { status: 500, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+
+        if (!ideasResult.reply || !Array.isArray(ideasResult.ammo_boxes)) {
+          return new Response(
+            JSON.stringify({ 
+              error: 'AI 返回格式不符合要求',
+              details: '缺少必要的字段: reply, ammo_boxes'
+            }),
+            { status: 500, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+
+        return new Response(JSON.stringify(ideasResult), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      // 处理 script 步骤
+      else if (step === 'script') {
+        const scriptSystemPrompt = getXueHuiScriptPrompt();
+        const scriptUserPrompt = `业务领域: ${industry}\n地理位置: ${location}\n选中的最帕: ${selected_hook}`;
+
+        const response = await openai.chat.completions.create({
+          model: 'deepseek-chat',
+          messages: [
+            { role: 'system', content: scriptSystemPrompt },
+            { role: 'user', content: scriptUserPrompt },
+          ],
+          temperature: 0.7,
+          max_tokens: 2500,
+        });
+
+        const aiResponse = response.choices[0].message?.content;
+
+        if (!aiResponse) {
+          return new Response(
+            JSON.stringify({ error: 'AI 未返回有效内容' }),
+            { status: 500, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+
+        return new Response(JSON.stringify({ content: aiResponse }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+    }
+
+    // 原有的脚本生成模式
     const supabase = await createClient();
-    
-    // 尝试从 Supabase 认证获取用户
     let userId: string | null = null;
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     
     if (user && !authError) {
-      // 传统 Supabase 认证用户
       userId = user.id;
     } else if (request.headers.get('x-user-phone')) {
-      // 线索收集模式：从请求头获取手机号
       const phone = request.headers.get('x-user-phone');
       userId = `lead_${phone}`;
     } else {
@@ -43,7 +239,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 获取用户会员信息
     const { data: userProfile, error: profileError } = await supabase
       .from('profiles')
       .select('*')
@@ -57,14 +252,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 检查会员是否过期
     const isMember = userProfile?.membership_level === 'premium';
     const membershipExpiry = userProfile?.membership_expire_at
       ? new Date(userProfile.membership_expire_at)
       : new Date();
     const isMembershipValid = isMember && membershipExpiry > new Date();
 
-    // 自由用户限制为 3 次/天，会员无限制
     const DAILY_LIMIT_FREE = 3;
     const currentUsage = userProfile?.daily_usage_count || 0;
 
@@ -81,7 +274,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 更新用户的日使用次数
     if (!isMembershipValid) {
       const newUsageCount = currentUsage + 1;
       const today = new Date();
@@ -92,16 +284,14 @@ export async function POST(request: NextRequest) {
         : new Date(0);
       lastUpdateDate.setHours(0, 0, 0, 0);
       
-      // 如果是新的一天，重置计数为 1
       if (lastUpdateDate.getTime() < today.getTime()) {
-        const { data: userProfile, error: profileError } = await supabase
+        const { data: existingProfile, error: checkError } = await supabase
           .from('profiles')
           .select('*')
           .eq('id', userId)
           .maybeSingle();
             
-        // 如果是新用户，重置计数
-        if (profileError) {
+        if (checkError) {
           await supabase
             .from('profiles')
             .insert([{
@@ -218,7 +408,94 @@ ${conversionGoalInstruction}
     return new Response(JSON.stringify(scriptResult), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
-    });
+    });// ‘流沒一闪争能 - Ideas 步骤处理
+    if (step === 'ideas') {
+      const ideasSystemPrompt = getXueHuiIdeasPrompt();
+      const ideasUserPrompt = `业务领域: ${industry}\n地理位置: ${location}`;
+
+      const response = await openai.chat.completions.create({
+        model: 'deepseek-chat',
+        messages: [
+          { role: 'system', content: ideasSystemPrompt },
+          { role: 'user', content: ideasUserPrompt },
+        ],
+        temperature: 0.7,
+        max_tokens: 2000,
+        response_format: { type: 'json_object' },
+      });
+
+      const aiResponse = response.choices[0].message?.content;
+
+      if (!aiResponse) {
+        return new Response(
+          JSON.stringify({ error: 'AI 未返回有效内容' }),
+          { status: 500, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+
+      let ideasResult: IdeasResult;
+      try {
+        const jsonMatch = aiResponse.match(/```json\n?([\s\S]*?)\n?```|```([\s\S]*)```|({[\s\S]*})/)
+        const jsonString = jsonMatch ? (jsonMatch[1] || jsonMatch[2] || jsonMatch[3]) : aiResponse;
+        ideasResult = JSON.parse(jsonString.trim());
+      } catch (parseError) {
+        console.error('JSON 解析错误:', parseError);
+        console.error('AI 响应内容:', aiResponse);
+        return new Response(
+          JSON.stringify({ 
+            error: 'AI 返回格式错误',
+            details: '无法解析 AI 返回的 JSON 格式'
+          }),
+          { status: 500, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+
+      // 验证 Ideas 结构
+      if (!ideasResult.reply || !Array.isArray(ideasResult.ammo_boxes)) {
+        return new Response(
+          JSON.stringify({ 
+            error: 'AI 返回格式不符合要求',
+            details: '缺少必要的字段: reply, ammo_boxes'
+          }),
+          { status: 500, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+
+      return new Response(JSON.stringify(ideasResult), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    // ‘流沒一闪争能 - Script 步骤处理
+    else if (step === 'script') {
+      const scriptSystemPrompt = getXueHuiScriptPrompt();
+      const scriptUserPrompt = `业务领域: ${industry}\n地理位置: ${location}\n选中的最帕: ${selected_hook}`;
+
+      const response = await openai.chat.completions.create({
+        model: 'deepseek-chat',
+        messages: [
+          { role: 'system', content: scriptSystemPrompt },
+          { role: 'user', content: scriptUserPrompt },
+        ],
+        temperature: 0.7,
+        max_tokens: 2500,
+      });
+
+      const aiResponse = response.choices[0].message?.content;
+
+      if (!aiResponse) {
+        return new Response(
+          JSON.stringify({ error: 'AI 未返回有效内容' }),
+          { status: 500, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+
+      // 返回脚本内容（Markdown 格式）
+      return new Response(JSON.stringify({ content: aiResponse }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
   } catch (error: any) {
     console.error('API 错误:', error);
     
