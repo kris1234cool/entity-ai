@@ -435,8 +435,8 @@ ${conversionGoalInstruction}
 
       let ideasResult: IdeasResult;
       try {
-        const jsonMatch = aiResponse.match(/```json\n?([\s\S]*?)\n?```|```([\s\S]*)```|({[\s\S]*})/)
-        const jsonString = jsonMatch ? (jsonMatch[1] || jsonMatch[2] || jsonMatch[3]) : aiResponse;
+        const jsonMatch = aiResponse!.match(/```json\n?([\s\S]*?)\n?```|```([\s\S]*)```|({[\s\S]*})/);
+        const jsonString = (jsonMatch?.[1] || jsonMatch?.[2] || jsonMatch?.[3] || aiResponse) || '';
         ideasResult = JSON.parse(jsonString.trim());
       } catch (parseError) {
         console.error('JSON 解析错误:', parseError);
