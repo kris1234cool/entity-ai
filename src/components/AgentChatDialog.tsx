@@ -10,6 +10,7 @@ import { Send, Sparkles, X, ChevronLeft, MoreHorizontal, AlertCircle } from 'luc
 import { ScriptType, ConversionGoal, ScriptResult } from '@/types';
 import { getAgentConfig, CONVERSION_GOALS } from '@/lib/agent-config';
 import ScriptCard from './ScriptCard';
+import { useAuth } from './auth/AuthWrapper';
 
 interface Message {
   role: 'ai' | 'user';
@@ -30,6 +31,7 @@ export default function AgentChatDialog({
   scriptType,
   shopProfile
 }: AgentChatDialogProps) {
+  const { user } = useAuth();
   const agentConfig = getAgentConfig(scriptType);
   const [messages, setMessages] = useState<Message[]>([]);
   const [userInput, setUserInput] = useState('');
@@ -78,11 +80,18 @@ export default function AgentChatDialog({
 
     try {
       // 调用 API 生成脚本
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      
+      // 线索收集模式：传递手机号
+      if (user?.phone) {
+        headers['x-user-phone'] = user.phone;
+      }
+      
       const response = await fetch('/api/generate', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify({
           scriptType,
           conversionGoal,

@@ -24,12 +24,19 @@ export async function POST(request: NextRequest) {
 
     // 检查用户会员状态和日限制
     const supabase = await createClient();
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-
-    if (authError || !user) {
+    
+    // 尝试从 Supabase 认证获取用户
+    let userId: string | null = null;
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    
+    if (user && !authError) {
+      // 传统 Supabase 认证用户
+      userId = user.id;
+    } else if (request.headers.get('x-user-phone')) {
+      // 线索收集模式：从请求头获取手机号
+      const phone = request.headers.get('x-user-phone');
+      userId = `lead_${phone}`;
+    } else {
       return new Response(
         JSON.stringify({ error: '请先登录' }),
         { status: 401, headers: { 'Content-Type': 'application/json' } }
@@ -40,10 +47,10 @@ export async function POST(request: NextRequest) {
     const { data: userProfile, error: profileError } = await supabase
       .from('profiles')
       .select('*')
-      .eq('id', user.id)
-      .single();
+      .eq('id', userId)
+      .maybeSingle();
 
-    if (profileError) {
+    if (profileError || !userProfile) {
       return new Response(
         JSON.stringify({ error: '获取用户信息失败' }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
@@ -87,15 +94,34 @@ export async function POST(request: NextRequest) {
       
       // 如果是新的一天，重置计数为 1
       if (lastUpdateDate.getTime() < today.getTime()) {
-        await supabase
+        const { data: userProfile, error: profileError } = await supabase
           .from('profiles')
-          .update({ daily_usage_count: 1, updated_at: new Date().toISOString() })
-          .eq('id', user.id);
+          .select('*')
+          .eq('id', userId)
+          .maybeSingle();
+            
+        // 如果是新用户，重置计数
+        if (profileError) {
+          await supabase
+            .from('profiles')
+            .insert([{
+              id: userId,
+              phone: request.headers.get('x-user-phone') || '',
+              membership_level: 'free',
+              max_daily_usage: 3,
+              daily_usage_count: 1
+            }]);
+        } else {
+          await supabase
+            .from('profiles')
+            .update({ daily_usage_count: 1, updated_at: new Date().toISOString() })
+            .eq('id', userId);
+        }
       } else if (newUsageCount <= DAILY_LIMIT_FREE) {
         await supabase
           .from('profiles')
           .update({ daily_usage_count: newUsageCount, updated_at: new Date().toISOString() })
-          .eq('id', user.id);
+          .eq('id', userId);
       }
     }
     const conversionGoalInstruction = getConversionGoalInstruction(conversionGoal);
