@@ -2,7 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent } from '@/components/ui/dialog';
 import AgentChatDialog from '@/components/AgentChatDialog';
+import ScriptGenerator from '@/components/ScriptGenerator';
 import { useAuth } from '@/components/auth/AuthWrapper';
 import { useProject } from '@/contexts/ProjectContext';
 import { useRouter } from 'next/navigation';
@@ -33,10 +35,17 @@ export default function Dashboard() {
       alert('请解锁 VIP 畷享全能导演模式！');
       return;
     }
-
+  
+    // 灵感一闪特殊处理：不需要店铺档案
+    if (scriptType === '✨ 灵感一闪') {
+      setSelectedScriptType(scriptType);
+      setIsDialogOpen(true);
+      return;
+    }
+  
     if (!activeProject) {
       // 如果没有活跳档案，提示用户先创建
-      alert('请先在“我的”页面创建或选择一个店铺档案');
+      alert('请先在"我的"页面创建或选择一个店铺档案');
       router.push('/profile');
       return;
     }
@@ -170,8 +179,17 @@ export default function Dashboard() {
               })}
             </div>
 
-            {/* Agent 对话框 */}
-            {selectedScriptType && (
+            {/* 灵感一闪 - 2 步流程 */}
+            {selectedScriptType === '✨ 灵感一闪' && (
+              <Dialog open={isDialogOpen} onOpenChange={handleCloseDialog}>
+                <DialogContent className="fixed top-0 left-0 translate-x-0 translate-y-0 w-full h-[100dvh] m-0 p-0 rounded-none border-none bg-slate-50 flex flex-col shadow-none max-w-none z-[100] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:slide-in-from-right data-[state=closed]:slide-out-to-right">
+                  <ScriptGenerator shopProfile={activeProject} onClose={handleCloseDialog} />
+                </DialogContent>
+              </Dialog>
+            )}
+
+            {/* 其他脚本类型 - Agent 对话框 */}
+            {selectedScriptType && selectedScriptType !== '✨ 灵感一闪' && (
               <AgentChatDialog
                 isOpen={isDialogOpen}
                 onClose={handleCloseDialog}
