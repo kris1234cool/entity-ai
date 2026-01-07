@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { ScriptResult, IdeasResult } from '@/types';
+import { useAuth } from './auth/AuthWrapper';
 
 interface ScriptGeneratorProps {
   shopProfile: any;
@@ -16,6 +17,7 @@ interface AmmoBox {
 }
 
 export default function ScriptGenerator({ shopProfile, onClose }: ScriptGeneratorProps) {
+  const { user } = useAuth();
   const [step, setStep] = useState<Step>('idle');
   const [industry, setIndustry] = useState('');
   const [location, setLocation] = useState('');
@@ -34,11 +36,18 @@ export default function ScriptGenerator({ shopProfile, onClose }: ScriptGenerato
 
     setLoading(true);
     try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      
+      // 传递用户手机号
+      if (user?.phone) {
+        headers['x-user-phone'] = user.phone;
+      }
+      
       const response = await fetch('/api/generate', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify({
           step: 'ideas',
           industry,
@@ -67,11 +76,18 @@ export default function ScriptGenerator({ shopProfile, onClose }: ScriptGenerato
     setSelectedHook(hook);
     setLoading(true);
     try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      
+      // 传递用户手机号
+      if (user?.phone) {
+        headers['x-user-phone'] = user.phone;
+      }
+      
       const response = await fetch('/api/generate', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify({
           step: 'script',
           industry,
