@@ -12,14 +12,31 @@ import { AGENT_CONFIG } from '@/lib/agent-config';
 export default function Dashboard() {
   const [selectedScriptType, setSelectedScriptType] = useState<ScriptType | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const { user, loading: authLoading } = useAuth();
+  const { user, profile, loading: authLoading } = useAuth();
   const { activeProject, loading: projectLoading } = useProject();
   const router = useRouter();
 
+  // 检查用户是否为 VIP 会员（根据数据库中的会员等级和过期时间）
+  const isVipMember = () => {
+    if (!profile) return false;
+    if (profile.membership_level !== 'premium' && profile.membership_level !== 'enterprise') return false;
+    if (!profile.membership_expire_at) return false;
+    return new Date(profile.membership_expire_at) > new Date();
+  };
+
+  // VIP 用户解锁所有功能，免费用户只能用第一个
+  const lockedScriptTypes = isVipMember() ? [] : ['进店理由', '观点输出', '口播', '爆款选题', '爆款仿写'];
+
   const handleScriptTypeClick = (scriptType: ScriptType) => {
+    // 检查是否是锁定的脚本类型
+    if (lockedScriptTypes.includes(scriptType)) {
+      alert('请解锁 VIP 畷享全能导演模式！');
+      return;
+    }
+
     if (!activeProject) {
-      // 如果没有活跃档案，提示用户先创建
-      alert('请先在"我的"页面创建或选择一个店铺档案');
+      // 如果没有活跳档案，提示用户先创建
+      alert('请先在“我的”页面创建或选择一个店铺档案');
       router.push('/profile');
       return;
     }
@@ -80,33 +97,77 @@ export default function Dashboard() {
             
             {/* Vertical Stack Layout - One Card Per Row */}
             <div className="flex flex-col gap-3">
-              {Object.entries(AGENT_CONFIG).map(([scriptType, config]) => (
-                <button
-                  key={config.id}
-                  onClick={() => handleScriptTypeClick(scriptType as ScriptType)}
-                  className="bg-white/40 backdrop-blur-xl border border-white/60 shadow-[0_8px_32px_0_rgba(31,38,135,0.07)] hover:shadow-[0_8px_32px_0_rgba(31,38,135,0.15)] transition-all duration-500 rounded-[28px] py-4 px-5 text-left group active:scale-[0.97]"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                      {/* Glass Circle Icon */}
-                      <div className="w-11 h-11 rounded-2xl bg-white/60 backdrop-blur-md border border-white/80 flex items-center justify-center text-2xl shadow-sm group-hover:scale-110 group-hover:rotate-3 transition-transform flex-shrink-0">
-                        {config.icon}
+              {Object.entries(AGENT_CONFIG).map(([scriptType, config], index) => {
+                const isLocked = lockedScriptTypes.includes(scriptType as ScriptType);
+                const isFirstOption = index === 0;
+                
+                return (
+                  <button
+                    key={config.id}
+                    onClick={() => handleScriptTypeClick(scriptType as ScriptType)}
+                    disabled={isLocked}
+                    className={`relative backdrop-blur-xl border shadow-[0_8px_32px_0_rgba(31,38,135,0.07)] hover:shadow-[0_8px_32px_0_rgba(31,38,135,0.15)] transition-all duration-500 rounded-[28px] py-4 px-5 text-left group active:scale-[0.97] ${
+                      isFirstOption
+                        ? 'bg-gradient-to-r from-amber-50 to-yellow-50 border-yellow-300/50 hover:border-yellow-400 hover:shadow-[0_8px_32px_0_rgba(180,83,9,0.15)]'
+                        : isLocked
+                        ? 'bg-gray-100/50 border-gray-200/50 opacity-60 cursor-not-allowed'
+                        : 'bg-white/40 border-white/60 hover:shadow-[0_8px_32px_0_rgba(31,38,135,0.15)]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-4">
+                        {/* Glass Circle Icon */}
+                        <div className={`w-11 h-11 rounded-2xl backdrop-blur-md border flex items-center justify-center text-2xl shadow-sm group-hover:scale-110 group-hover:rotate-3 transition-transform flex-shrink-0 ${
+                          isFirstOption
+                            ? 'bg-yellow-100/60 border-yellow-300/80'
+                            : isLocked
+                            ? 'bg-gray-200/60 border-gray-300/50'
+                            : 'bg-white/60 border-white/80'
+                        }`}>
+                          {config.icon}
+                        </div>
+                        {/* Title + Subtitle */}
+                        <div>
+                          <h4 className={`font-bold text-[16px] mb-0.5 tracking-tight ${
+                            isFirstOption
+                              ? 'text-amber-900'
+                              : isLocked
+                              ? 'text-gray-500'
+                              : 'text-slate-900'
+                          }`}>{scriptType}</h4>
+                          <p className={`text-[12px] font-medium leading-tight opacity-80 ${
+                            isFirstOption
+                              ? 'text-amber-700'
+                              : isLocked
+                              ? 'text-gray-400'
+                              : 'text-slate-500'
+                          }`}>{config.description}</p>
+                        </div>
                       </div>
-                      {/* Title + Subtitle */}
-                      <div>
-                        <h4 className="font-bold text-slate-900 text-[16px] mb-0.5 tracking-tight">{scriptType}</h4>
-                        <p className="text-[12px] text-slate-500 font-medium leading-tight opacity-80">{config.description}</p>
+                      <div className="flex items-center gap-2">
+                        {/* Lock Icon for Locked Options */}
+                        {isLocked && (
+                          <div className="text-xl text-red-500">🔒</div>
+                        )}
+                        {/* Arrow Icon for Unlocked Options */}
+                        {!isLocked && (
+                          <div className={`w-7 h-7 rounded-full flex items-center justify-center ${
+                            isFirstOption
+                              ? 'bg-yellow-100/60 opacity-100'
+                              : 'bg-white/40 opacity-0 group-hover:opacity-100'
+                          } transition-opacity`}>
+                            <svg className={`w-4 h-4 ${
+                              isFirstOption ? 'text-amber-600' : 'text-slate-400'
+                            }`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M9 5l7 7-7 7" />
+                            </svg>
+                          </div>
+                        )}
                       </div>
                     </div>
-                    {/* Arrow Icon */}
-                    <div className="w-7 h-7 rounded-full bg-white/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                      <svg className="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M9 5l7 7-7 7" />
-                      </svg>
-                    </div>
-                  </div>
-                </button>
-              ))}
+                  </button>
+                );
+              })}
             </div>
 
             {/* Agent 对话框 */}

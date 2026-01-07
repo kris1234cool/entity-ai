@@ -15,13 +15,13 @@ interface ScriptGeneratorProps {
 }
 
 export default function ScriptGenerator({ shopProfile }: ScriptGeneratorProps) {
-  const [scriptType, setScriptType] = useState<ScriptType>('人设故事');
+  const [scriptType, setScriptType] = useState<ScriptType>('✨ 灵感一闪');
   const [conversionGoal, setConversionGoal] = useState<ConversionGoal>('涨粉');
   const [topic, setTopic] = useState('');
   const [loading, setLoading] = useState(false);
   const [generatedScript, setGeneratedScript] = useState<any>(null);
 
-  const scriptTypes: ScriptType[] = ['人设故事', '进店理由', '观点输出', '口播', '爆款选题', '爆款仿写'];
+  const scriptTypes: ScriptType[] = ['✨ 灵感一闪', '进店理由', '观点输出', '口播', '爆款选题', '爆款仿写'];
   const conversionGoals: ConversionGoal[] = ['涨粉', '卖货', '信任'];
 
   const handleSubmit = async (e: React.FormEvent) => {

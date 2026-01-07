@@ -10,7 +10,7 @@ export interface AgentConfig {
 }
 
 export const AGENT_CONFIG: Record<string, AgentConfig> = {
-  '人设故事': {
+  '✨ 灵感一闪': {
     id: 'hero_story',
     name: '人设故事编导',
     icon: '🎭',
@@ -110,5 +110,5 @@ export const AGENT_CONFIG: Record<string, AgentConfig> = {
 export const CONVERSION_GOALS: ConversionGoal[] = ['涨粉', '卖货', '信任'];
 
 export const getAgentConfig = (scriptType: ScriptType): AgentConfig => {
-  return AGENT_CONFIG[scriptType] || AGENT_CONFIG['人设故事'];
+  return AGENT_CONFIG[scriptType] || AGENT_CONFIG['✨ 灵感一闪'];
 };

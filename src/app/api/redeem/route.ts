@@ -3,7 +3,7 @@ import { createClient } from '@/utils/supabase/server';
 
 export async function POST(req: NextRequest) {
   try {
-    const { code } = await req.json();
+    const { code, phone } = await req.json();
 
     if (!code || typeof code !== 'string') {
       return NextResponse.json(
@@ -12,14 +12,23 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 获取当前用户
     const supabase = await createClient();
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-
-    if (authError || !user) {
+    
+    // 尝试从 Supabase 认证获取用户（传统模式）
+    let userId: string | null = null;
+    let userPhone: string = phone || '';
+    
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    
+    if (user && !authError) {
+      // 如果有 Supabase 认证用户，使用该用户
+      userId = user.id;
+      userPhone = user.phone || phone || '';
+    } else if (phone) {
+      // 线索收集模式：使用手机号作为用户标识
+      userId = `lead_${phone}`;
+      userPhone = phone;
+    } else {
       return NextResponse.json(
         { error: '请先登录' },
         { status: 401 }
@@ -52,7 +61,7 @@ export async function POST(req: NextRequest) {
     let { data: userProfile, error: profileError } = await supabase
       .from('profiles')
       .select('*')
-      .eq('id', user.id)
+      .eq('id', userId)
       .maybeSingle();
 
     // 如果档案不存在（新用户），则创建一个
@@ -60,8 +69,8 @@ export async function POST(req: NextRequest) {
       const { data: newProfile, error: createError } = await supabase
         .from('profiles')
         .insert([{ 
-          id: user.id, 
-          phone: user.phone || '',
+          id: userId, 
+          phone: userPhone,
           membership_level: 'free',
           max_daily_usage: 3,
           daily_usage_count: 0
@@ -85,7 +94,7 @@ export async function POST(req: NextRequest) {
     const baseDate = currentExpiry > new Date() ? currentExpiry : new Date();
     const newExpiry = new Date(baseDate);
     
-    // 修复：使用数据库中实际的字段名 'days'
+    // 使用数据库中实际的字段名 'days'
     newExpiry.setDate(newExpiry.getDate() + (redeemCode.days || 30));
 
     // 更新用户会员信息
@@ -96,7 +105,7 @@ export async function POST(req: NextRequest) {
         membership_expire_at: newExpiry.toISOString(),
         updated_at: new Date().toISOString(),
       })
-      .eq('id', user.id);
+      .eq('id', userId);
 
     if (updateError) {
       return NextResponse.json(
@@ -110,7 +119,7 @@ export async function POST(req: NextRequest) {
       .from('redeem_codes')
       .update({
         is_used: true,
-        used_by: user.id,
+        used_by: userId,
         used_at: new Date().toISOString(),
       })
       .eq('code', code.toUpperCase());

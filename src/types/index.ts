@@ -15,7 +15,7 @@ export interface ScriptResult {
 export type ConversionGoal = '涨粉' | '卖货' | '信任';
 
 // 脚本类型
-export type ScriptType = '人设故事' | '进店理由' | '观点输出' | '口播' | '爆款选题' | '爆款仿写';
+export type ScriptType = '✨ 灵感一闪' | '进店理由' | '观点输出' | '口播' | '爆款选题' | '爆款仿写';
 
 // 用户档案类型
 export interface ShopProfile {

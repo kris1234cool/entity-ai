@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { UserProfile } from '@/types';
 import { Crown, Zap } from 'lucide-react';
+import { useAuth } from '@/components/auth/AuthWrapper';
 
 interface MembershipCardProps {
   profile: UserProfile | null;
@@ -13,6 +14,7 @@ interface MembershipCardProps {
 }
 
 export default function MembershipCard({ profile, onRedeemSuccess }: MembershipCardProps) {
+  const { user, refreshProfile } = useAuth();
   const [redeemCode, setRedeemCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -36,10 +38,14 @@ export default function MembershipCard({ profile, onRedeemSuccess }: MembershipC
     setSuccess('');
 
     try {
+      // 传递手机号和卡密给 API（支持线索收集模式）
       const response = await fetch('/api/redeem', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: redeemCode }),
+        body: JSON.stringify({ 
+          code: redeemCode,
+          phone: user?.phone || '' 
+        }),
       });
 
       const data = await response.json();
@@ -51,6 +57,9 @@ export default function MembershipCard({ profile, onRedeemSuccess }: MembershipC
 
       setSuccess(data.message);
       setRedeemCode('');
+      
+      // 刷新用户档案（从数据库重新获取最新状态）
+      await refreshProfile();
       
       // 延迟关闭和回调
       setTimeout(() => {
