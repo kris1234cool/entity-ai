@@ -62,7 +62,8 @@ export async function POST(request: NextRequest) {
         .eq('id', userId)
         .maybeSingle();
 
-      if (profileError || !userProfile) {
+      // script 步骤不需要严格检查用户配置（因为不计数）
+      if (step === 'ideas' && (profileError || !userProfile)) {
         return new Response(
           JSON.stringify({ error: '获取用户信息失败' }),
           { status: 500, headers: { 'Content-Type': 'application/json' } }
