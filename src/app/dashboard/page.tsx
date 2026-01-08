@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import AgentChatDialog from '@/components/AgentChatDialog';
 import ScriptGenerator from '@/components/ScriptGenerator';
+import ViralRewriteDialog from '@/components/ViralRewriteDialog';
 import { useAuth } from '@/components/auth/AuthWrapper';
 import { useProject } from '@/contexts/ProjectContext';
 import { useRouter } from 'next/navigation';
@@ -188,8 +189,17 @@ export default function Dashboard() {
               </Dialog>
             )}
 
+            {/* 爆款仿写 - 特殊处理 */}
+            {selectedScriptType === '爆款仿写' && (
+              <ViralRewriteDialog
+                isOpen={isDialogOpen}
+                onClose={handleCloseDialog}
+                shopProfile={activeProject}
+              />
+            )}
+
             {/* 其他脚本类型 - Agent 对话框 */}
-            {selectedScriptType && selectedScriptType !== '✨ 灵感一闪' && (
+            {selectedScriptType && selectedScriptType !== '✨ 灵感一闪' && selectedScriptType !== '爆款仿写' && (
               <AgentChatDialog
                 isOpen={isDialogOpen}
                 onClose={handleCloseDialog}
