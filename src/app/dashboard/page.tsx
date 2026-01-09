@@ -6,6 +6,7 @@ import { Dialog, DialogContent } from '@/components/ui/dialog';
 import AgentChatDialog from '@/components/AgentChatDialog';
 import ScriptGenerator from '@/components/ScriptGenerator';
 import ViralRewriteDialog from '@/components/ViralRewriteDialog';
+import DigitalHumanDialog from '@/components/DigitalHumanDialog';
 import { useAuth } from '@/components/auth/AuthWrapper';
 import { useProject } from '@/contexts/ProjectContext';
 import { useRouter } from 'next/navigation';
@@ -15,6 +16,7 @@ import { AGENT_CONFIG } from '@/lib/agent-config';
 export default function Dashboard() {
   const [selectedScriptType, setSelectedScriptType] = useState<ScriptType | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isDigitalHumanOpen, setIsDigitalHumanOpen] = useState(false);
   const { user, profile, loading: authLoading } = useAuth();
   const { activeProject, loading: projectLoading } = useProject();
   const router = useRouter();
@@ -189,6 +191,38 @@ export default function Dashboard() {
               </Dialog>
             )}
 
+            {/* 一键数字人视频按钮 */}
+            <div className="mt-6">
+              <button
+                onClick={() => setIsDigitalHumanOpen(true)}
+                className="w-full relative backdrop-blur-xl border shadow-[0_8px_32px_0_rgba(31,38,135,0.07)] hover:shadow-[0_8px_32px_0_rgba(31,38,135,0.15)] transition-all duration-500 rounded-[28px] py-4 px-5 text-left group active:scale-[0.97] bg-gradient-to-r from-cyan-50 to-blue-50 border-cyan-300/50 hover:border-cyan-400 hover:shadow-[0_8px_32px_0_rgba(6,182,212,0.15)]"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="w-11 h-11 rounded-2xl backdrop-blur-md border bg-cyan-100/60 border-cyan-300/80 flex items-center justify-center text-2xl shadow-sm group-hover:scale-110 group-hover:rotate-3 transition-transform flex-shrink-0">
+                      🎬
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-[16px] mb-0.5 tracking-tight text-cyan-900">一键数字人视频</h4>
+                      <p className="text-[12px] font-medium leading-tight opacity-80 text-cyan-700">将文案转为数字人口播视频</p>
+                    </div>
+                  </div>
+                  <div className="w-7 h-7 rounded-full flex items-center justify-center bg-cyan-100/60 opacity-100 transition-opacity">
+                    <svg className="w-4 h-4 text-cyan-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </div>
+                </div>
+              </button>
+            </div>
+            
+            {/* 数字人对话框 */}
+            <DigitalHumanDialog
+              isOpen={isDigitalHumanOpen}
+              onClose={() => setIsDigitalHumanOpen(false)}
+              userId={user?.id || 'anonymous'}
+            />
+            
             {/* 爆款仿写 - 特殊处理 */}
             {selectedScriptType === '爆款仿写' && (
               <ViralRewriteDialog

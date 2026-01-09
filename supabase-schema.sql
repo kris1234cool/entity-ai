@@ -103,6 +103,30 @@ CREATE TRIGGER update_projects_updated_at
 -- 创建扩展以支持 UUID 生成
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
+-- 创建 user_digital_assets 表 - 存储用户数字人资产 (Voice ID 和默认视频)
+CREATE TABLE IF NOT EXISTS user_digital_assets (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id TEXT NOT NULL,           -- 对应 clerk 或其他 auth 的 user_id
+  voice_id TEXT,                    -- 复刻后的阿里云 Voice ID
+  default_video_url TEXT,           -- 用户上传的默认底板视频 URL
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+  UNIQUE(user_id)
+);
+
+-- 启用 RLS
+ALTER TABLE user_digital_assets ENABLE ROW LEVEL SECURITY;
+
+-- 创建 RLS 策略 (允许所有操作，因为 user_id 是 TEXT 而非 auth.uid)
+CREATE POLICY "Users can manage own digital assets" ON user_digital_assets
+  FOR ALL USING (true);
+
+-- 创建更新时间触发器
+CREATE TRIGGER update_user_digital_assets_updated_at 
+  BEFORE UPDATE ON user_digital_assets 
+  FOR EACH ROW 
+  EXECUTE FUNCTION update_updated_at_column();
+
 -- 插入示例卡密（可选）
 -- INSERT INTO redeem_codes (code, membership_level, validity_days) VALUES
 -- ('PREMIUM2024', 'premium', 30),
