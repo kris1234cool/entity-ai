@@ -27,12 +27,27 @@ type VoiceSource = 'custom' | 'system';
 
 // 轮询间隔和最大次数
 const POLL_INTERVAL = 3000; // 3秒
-const MAX_POLL_ATTEMPTS = 60; // 最多轮询 3 分钟
+const MAX_POLL_ATTEMPTS = 200; // 最多轮询 10 分钟 (适配长文案)
 
-// 系统预设音色列表
+// 系统预设音色库 - 3男3女 核心品牌音色
 const SYSTEM_VOICES = [
-  { id: 'longxiaochun', name: '知性女声 (龙小淳)', icon: '👩' },
-  { id: 'longcheng', name: '磁性男声 (龙诚)', icon: '👨' },
+  // 女声
+  { id: 'longxiaochun', name: '雅雅', tag: '旗舰', desc: '全能商业', icon: '👑', gender: 'female' },
+  { id: 'longxiaowan', name: '小娩', tag: '热粉', desc: '元气少女', icon: '💗', gender: 'female' },
+  { id: 'longyebai', name: '白白', tag: '柔情', desc: '温柔邻家', icon: '🌸', gender: 'female' },
+  // 男声
+  { id: 'longcheng', name: '严选男声', tag: '至尊', desc: '睿智精英', icon: '👔', gender: 'male' },
+  { id: 'longlaotie', name: '老铁', tag: '接地', desc: '东北大哥', icon: '🍺', gender: 'male' },
+  { id: 'longfei', name: '龙飞', tag: '硬核', desc: '铁血真男', icon: '💪', gender: 'male' },
+];
+
+// SSML 标签工具按钮配置
+const SSML_TOOLS = [
+  { label: '🛑停', tag: '[停顿500ms]', title: '插入停顿' },
+  { label: '🌬️气', tag: '[吸气]', title: '插入吸气' },
+  { label: '📈重', tag: '[重读]', title: '插入重读' },
+  { label: '🐢慢', tag: '[慢读]', title: '插入慢读' },
+  { label: '💡思', tag: '[思考]', title: '插入思考停顿' },
 ];
 
 export default function DigitalHumanDialog({ 
@@ -62,7 +77,56 @@ export default function DigitalHumanDialog({
   
   const audioInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const supabase = createClient();
+
+  // 在光标位置插入文本
+  const insertAtCursor = (insertText: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const before = text.substring(0, start);
+    const after = text.substring(end);
+    
+    const newText = before + insertText + after;
+    setText(newText);
+    
+    // 恢复光标位置
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(start + insertText.length, start + insertText.length);
+    }, 0);
+  };
+
+  // 一键智能润色：根据标点、关键词和段落结构自动插入情感标签
+  const handleAutoPolish = () => {
+    let polished = text.trim();
+    
+    // 1. 段首强制增加 [吸气]
+    if (!polished.startsWith('[吸气]')) {
+      polished = '[吸气]' + polished;
+    }
+    
+    // 2. 在标点符号（，。！？）后插入 [停顿500ms]
+    polished = polished.replace(/([，。！？,.!?])/g, '$1[停顿500ms]');
+    
+    // 3. 逻辑词增强：识别关键词并在其后追加停顿
+    const keywords = ['但是', '所以', '其实', '注意', '听好了', '尤其是', '特别注意'];
+    keywords.forEach(word => {
+      const reg = new RegExp(`(${word})(?!\\[停顿)`, 'g');
+      polished = polished.replace(reg, '$1[停顿500ms]');
+    });
+    
+    // 4. 清理冗余标签 (防止重复点击导致标签堆叠)
+    polished = polished.replace(/(\[停顿500ms\]){2,}/g, '[停顿500ms]');
+    
+    setText(polished);
+    
+    // 保持焦点
+    setTimeout(() => textareaRef.current?.focus(), 0);
+  };
 
   // 判断资产是否就绪（系统音色不需要 voice_id）
   const hasVideo = !!assets?.default_video_url;
@@ -96,7 +160,7 @@ export default function DigitalHumanDialog({
   const pollTaskStatus = useCallback(async (currentTaskId: string) => {
     if (pollCountRef.current >= MAX_POLL_ATTEMPTS) {
       setIsPolling(false);
-      setError('视频生成超时，请稍后重试');
+      setError('视频合成时间较长，系统仍在后台排队生成中。您可以稍后刷新页面查看，或尝试缩短文案重新生成。');
       return;
     }
 
@@ -157,6 +221,7 @@ export default function DigitalHumanDialog({
       if (data.error) {
         throw new Error(data.error);
       }
+      console.log('📦 加载资产:', data.assets?.default_video_url);
       setAssets(data.assets);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '加载资产失败';
@@ -219,12 +284,21 @@ export default function DigitalHumanDialog({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // 文件大小限制 50MB
+    const MAX_SIZE_MB = 50;
+    if (file.size > MAX_SIZE_MB * 1024 * 1024) {
+      setError(`视频文件过大，请压缩后重试（最大 ${MAX_SIZE_MB}MB，当前 ${(file.size / 1024 / 1024).toFixed(1)}MB）`);
+      if (videoInputRef.current) videoInputRef.current.value = '';
+      return;
+    }
+
     setUploading('video');
     setError(null);
     
     try {
       // 1. 上传到 Supabase Storage
       const videoUrl = await uploadToStorage(file, 'base_videos');
+      console.log('🎥 新视频上传成功:', videoUrl);
       
       // 2. 更新资产
       const res = await fetch('/api/digital-assets', {
@@ -234,10 +308,12 @@ export default function DigitalHumanDialog({
       });
       
       const data = await res.json();
+      console.log('💾 API响应:', data);
       if (data.error) throw new Error(data.error);
       
       // 3. 刷新资产
       await loadAssets();
+      console.log('✅ 资产已刷新');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '视频上传失败';
       setError(msg);
@@ -309,6 +385,9 @@ export default function DigitalHumanDialog({
     // 根据声音来源选择参数
     const voiceId = voiceSource === 'custom' ? assets.voice_id : selectedSystemVoice;
     const model = voiceSource === 'custom' ? 'cosyvoice-v3-plus' : 'cosyvoice-v1';
+
+    // 🚨 关键调试点：打印将要使用的视频URL
+    console.log('🚀 生成视频使用的 video_url:', assets.default_video_url);
 
     // 重置状态
     handleReset();
@@ -414,13 +493,37 @@ export default function DigitalHumanDialog({
               📝 口播文案
             </label>
             <Textarea
+              ref={textareaRef}
               value={text}
               onChange={(e) => setText(e.target.value)}
               placeholder="输入你想让数字人播报的文案..."
-              className="min-h-[120px] resize-none"
+              className="min-h-[120px] resize-none rounded-b-none border-b-0"
             />
+            {/* 润色工具栏 */}
+            <div className="flex items-center justify-between px-3 py-2 bg-slate-50 border border-t-0 border-slate-200 rounded-b-lg">
+              {/* 左侧：一键润色 */}
+              <button
+                onClick={handleAutoPolish}
+                className="flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-amber-400 to-orange-400 text-white text-xs font-medium rounded-full shadow-sm hover:shadow-md transition-all"
+              >
+                ✨ 一键润色
+              </button>
+              {/* 右侧：SSML 快捷按钮 */}
+              <div className="flex gap-1">
+                {SSML_TOOLS.map((tool) => (
+                  <button
+                    key={tool.tag}
+                    onClick={() => insertAtCursor(tool.tag)}
+                    title={tool.title}
+                    className="px-2 py-1 text-xs bg-white border border-slate-200 rounded-md hover:bg-slate-100 hover:border-slate-300 transition-all"
+                  >
+                    {tool.label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <p className="text-xs text-slate-400 mt-1">
-              {text.length} 字 | 建议 50-200 字效果最佳
+              {text.length} 字 | 点击工具栏插入语音效果标签
             </p>
           </div>
 
@@ -461,29 +564,54 @@ export default function DigitalHumanDialog({
                 </div>
               </div>
 
-              {/* 系统音色选择 */}
+              {/* 系统音色选择 - 2列3行卡片布局 */}
               {voiceSource === 'system' && (
-                <div className="p-4 bg-indigo-50 rounded-xl border border-indigo-200">
-                  <p className="text-sm text-indigo-700 font-medium mb-3">选择系统音色</p>
+                <div className="p-3 bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl border border-indigo-200">
                   <div className="grid grid-cols-2 gap-2">
                     {SYSTEM_VOICES.map((voice) => (
                       <button
                         key={voice.id}
                         onClick={() => setSelectedSystemVoice(voice.id)}
-                        className={`p-3 rounded-lg text-left transition-all ${
+                        className={`relative flex flex-col items-center p-3 rounded-xl transition-all ${
                           selectedSystemVoice === voice.id
-                            ? 'bg-indigo-600 text-white shadow-md'
-                            : 'bg-white text-slate-700 hover:bg-indigo-100 border border-slate-200'
+                            ? 'bg-gradient-to-br from-indigo-600 to-purple-600 text-white shadow-lg scale-[1.02]'
+                            : 'bg-white text-slate-700 hover:bg-white hover:shadow-md border border-slate-200/50'
                         }`}
                       >
-                        <span className="text-lg">{voice.icon}</span>
-                        <p className={`text-xs mt-1 ${selectedSystemVoice === voice.id ? 'text-indigo-100' : 'text-slate-500'}`}>
+                        {/* 标签 */}
+                        <span className={`absolute -top-1 -right-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                          selectedSystemVoice === voice.id
+                            ? 'bg-yellow-400 text-yellow-900'
+                            : voice.tag === '旗舰' ? 'bg-amber-100 text-amber-700'
+                            : voice.tag === '至尊' ? 'bg-purple-100 text-purple-700'
+                            : voice.tag === '热粉' ? 'bg-pink-100 text-pink-700'
+                            : voice.tag === '柔情' ? 'bg-rose-100 text-rose-700'
+                            : voice.tag === '博学' ? 'bg-blue-100 text-blue-700'
+                            : 'bg-slate-100 text-slate-700'
+                        }`}>
+                          {voice.tag}
+                        </span>
+                        {/* 图标 */}
+                        <span className="text-2xl mb-1">{voice.icon}</span>
+                        {/* 名称 */}
+                        <p className={`text-sm font-semibold ${
+                          selectedSystemVoice === voice.id ? 'text-white' : 'text-slate-800'
+                        }`}>
                           {voice.name}
                         </p>
+                        {/* 描述 */}
+                        <p className={`text-[10px] ${
+                          selectedSystemVoice === voice.id ? 'text-indigo-100' : 'text-slate-400'
+                        }`}>
+                          {voice.desc}
+                        </p>
+                        {/* 选中标记 */}
+                        {selectedSystemVoice === voice.id && (
+                          <span className="absolute bottom-1 right-1 text-white/80 text-xs">✓</span>
+                        )}
                       </button>
                     ))}
                   </div>
-                  <p className="text-xs text-indigo-500 mt-2">✨ 系统音色无需上传，开箱即用</p>
                 </div>
               )}
 

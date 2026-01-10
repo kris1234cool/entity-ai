@@ -29,6 +29,8 @@ export async function GET(req: Request) {
       .from('user_digital_assets')
       .select('*')
       .eq('user_id', userId)
+      .order('updated_at', { ascending: false })
+      .limit(1)
       .single();
 
     // PGRST116 表示未找到记录，不算错误
@@ -36,6 +38,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
     
+    console.log(`📦 GET assets for ${userId}:`, data?.default_video_url);
     return NextResponse.json({ assets: data || null });
   } catch (error: unknown) {
     console.error('GET Digital Assets Error:', error);
@@ -56,12 +59,27 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    // 检查是否已存在记录
-    const { data: existing } = await supabase
+    console.log(`📥 POST asset: userId=${userId}, type=${type}, url=${url.substring(0, 50)}...`);
+
+    // 检查是否已存在记录 (不用 single，避免多条记录报错)
+    const { data: existingList } = await supabase
       .from('user_digital_assets')
-      .select('*')
-      .eq('user_id', userId)
-      .single();
+      .select('id, default_video_url, voice_id')
+      .eq('user_id', userId);
+    
+    const existing = existingList && existingList.length > 0 ? existingList[0] : null;
+    
+    // 如果有多条记录，清理重复数据
+    if (existingList && existingList.length > 1) {
+      console.log(`⚠️ 发现 ${existingList.length} 条重复记录，清理中...`);
+      // 保留第一条，删除其他
+      const idsToDelete = existingList.slice(1).map(r => r.id);
+      await supabase
+        .from('user_digital_assets')
+        .delete()
+        .in('id', idsToDelete);
+      console.log(`✅ 已清理 ${idsToDelete.length} 条重复记录`);
+    }
     
     const updateData: Record<string, unknown> = { 
       user_id: userId, 
@@ -71,6 +89,10 @@ export async function POST(req: Request) {
     if (type === 'video') {
       // 直接更新视频 URL
       updateData.default_video_url = url;
+      // 保留原有的 voice_id
+      if (existing?.voice_id) {
+        updateData.voice_id = existing.voice_id;
+      }
     } else if (type === 'audio') {
       // 调用 Python 脚本复刻 Voice ID
       const scriptPath = path.join(process.cwd(), 'scripts', 'enroll_voice.py');
@@ -99,22 +121,33 @@ export async function POST(req: Request) {
         throw new Error("Invalid output from Python script");
       }
       updateData.voice_id = match[1].trim();
+      // 保留原有的 video_url
+      if (existing?.default_video_url) {
+        updateData.default_video_url = existing.default_video_url;
+      }
     } else {
       return NextResponse.json({ error: 'Invalid type' }, { status: 400 });
     }
 
-    // Upsert 数据
-    const upsertData = existing 
-      ? { ...existing, ...updateData }
-      : updateData;
-    
-    const { error } = await supabase
-      .from('user_digital_assets')
-      .upsert(upsertData);
-
-    if (error) {
-      throw error;
+    // 使用 upsert 确保数据一致性
+    if (existing) {
+      // 更新现有记录
+      const { error } = await supabase
+        .from('user_digital_assets')
+        .update(updateData)
+        .eq('id', existing.id);  // 用 id 而不是 user_id，更精确
+      
+      if (error) throw error;
+    } else {
+      // 插入新记录
+      const { error } = await supabase
+        .from('user_digital_assets')
+        .insert(updateData);
+      
+      if (error) throw error;
     }
+    
+    console.log(`✅ Asset updated: type=${type}, url=${updateData.default_video_url || updateData.voice_id}`);
     
     return NextResponse.json({ 
       success: true, 

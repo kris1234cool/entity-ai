@@ -15,6 +15,66 @@ const DASHSCOPE_API_KEY = process.env.DASHSCOPE_API_KEY!;
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 /**
+ * 音色品牌化映射：前端名称 -> 阿里云 Voice ID
+ * 支持 6 个核心品牌音色 (3男3女)
+ */
+const VOICE_NAME_MAP: Record<string, string> = {
+  // 女声
+  "雅雅": "longxiaochun",
+  "小娩": "longxiaowan",
+  "白白": "longyebai",
+  // 男声
+  "严选男声": "longcheng",
+  "老铁": "longlaotie",
+  "龙飞": "longfei",
+};
+
+/**
+ * 解析音色ID：支持品牌名称或直接传入技术ID
+ */
+function resolveVoiceId(voiceInput: string): string {
+  return VOICE_NAME_MAP[voiceInput] || voiceInput;
+}
+
+/**
+ * 文本预处理：将特殊标记转换为自然停顿
+ * 注：CosyVoice 目前不支持 SSML，使用文本替代方案
+ */
+/**
+ * 情感化文本预处理：将标签映射为能够引导 CosyVoice 情感起伏的标点
+ */
+function preprocessText(text: string): string {
+  let processed = text;
+  
+  // 1. 过滤干扰合成的特殊符号 (如音乐符号 🎼)
+  processed = processed.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E6}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F900}-\u{1F9FF}\u{1F3FB}-\u{1F3FF}\u{200D}\u{200B}\u{200E}\u{200F}\u{FE0F}\u{1F000}-\u{1F02B}\u{1F030}-\u{1F093}🎼]/gu, '');
+
+  // 2. 情感映射 (利用标点符号控制 prosody)
+  // [停顿] 映射为省略号引导的深层停顿
+  processed = processed.replace(/\[停顿\d+(ms|s)\]/g, '…… ');
+  
+  // [吸气] 映射为逗号产生的自然换气
+  processed = processed.replace(/\[吸气\]/g, '，');
+  
+  // [思考] [叹气] 映射为破折号产生的语气转折
+  processed = processed.replace(/\[(思考|叹气)\]/g, ' —— ');
+  
+  // [重读] 映射为感叹号引导的能量增强
+  processed = processed.replace(/\[重读\]/g, '！');
+  
+  // [慢读] 映射为省略号产生的语速放缓
+  processed = processed.replace(/\[慢读\]/g, '…… ');
+  
+  // 3. 规范化处理
+  processed = processed.replace(/？{2,}/g, '？');
+  processed = processed.replace(/！{2,}/g, '！');
+  processed = processed.replace(/。{2,}/g, '。');
+  processed = processed.replace(/……{2,}/g, '……');
+  
+  return processed.trim();
+}
+
+/**
  * POST: 生成数字人口播视频
  * Body: { text: string, voice_id: string, video_url: string, model?: string }
  */
@@ -29,6 +89,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Missing parameters: text, voice_id, video_url required" }, { status: 400 });
     }
 
+    // 音色品牌化映射
+    const resolvedVoiceId = resolveVoiceId(voice_id);
+    console.log(`🎤 Voice mapping: "${voice_id}" -> "${resolvedVoiceId}"`);
+    
+    // 文本预处理（移除标记，转为纯文本）
+    const processedText = preprocessText(text);
+    console.log(`📝 Processed Text: ${processedText.substring(0, 100)}...`);
+
     // 1. Python TTS 生成
     const tempDir = path.join(process.cwd(), 'tmp');
     if (!fs.existsSync(tempDir)) {
@@ -37,9 +105,9 @@ export async function POST(req: Request) {
     localAudioPath = path.join(tempDir, `tts_${Date.now()}.mp3`);
     const scriptPath = path.join(process.cwd(), 'scripts', 'tts_worker.py');
     
-    // 调用 Python 时传入 model 参数
-    const safeText = text.replace(/"/g, '\\"').replace(/\n/g, ' ');
-    const command = `python3 "${scriptPath}" "${safeText}" "${voice_id}" "${localAudioPath}" "${model}"`;
+    // 调用 Python 时使用 Base64 编码传输
+    const base64Text = Buffer.from(processedText).toString('base64');
+    const command = `python3 "${scriptPath}" "${base64Text}" "${resolvedVoiceId}" "${localAudioPath}" "${model}" --base64`;
     
     console.log("🎙️ Generating TTS...");
     console.log("Command:", command);
