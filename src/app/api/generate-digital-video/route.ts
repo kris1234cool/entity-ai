@@ -1,13 +1,22 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import OSS from 'ali-oss';
 
-export const runtime = 'edge';
+export const runtime = 'nodejs';
 
 // 环境变量
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const DASHSCOPE_API_KEY = process.env.DASHSCOPE_API_KEY!;
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+const OSS_REGION = process.env.NEXT_PUBLIC_OSS_REGION!;
+const OSS_ACCESS_KEY_ID = process.env.NEXT_PUBLIC_OSS_ACCESS_KEY_ID!;
+const OSS_ACCESS_KEY_SECRET = process.env.NEXT_PUBLIC_OSS_ACCESS_KEY_SECRET!;
+const OSS_BUCKET = process.env.NEXT_PUBLIC_OSS_BUCKET!;
+
+const ossClient = new OSS({
+  region: OSS_REGION,
+  accessKeyId: OSS_ACCESS_KEY_ID,
+  accessKeySecret: OSS_ACCESS_KEY_SECRET,
+  bucket: OSS_BUCKET,
+  secure: true,
+});
 
 /**
  * 音色品牌化映射：前端名称 -> 阿里云 Voice ID
@@ -111,23 +120,17 @@ export async function POST(req: Request) {
       throw new Error(`TTS API Error: ${errorText}`);
     }
 
-    const audioBuffer = await ttsResponse.arrayBuffer();
+    const audioArrayBuffer = await ttsResponse.arrayBuffer();
+    const audioBuffer = Buffer.from(audioArrayBuffer);
     const audioFilename = `gen_audio_${Date.now()}.mp3`;
 
-    // 2. 上传音频到 Supabase Storage
-    const { error: uploadError } = await supabase.storage
-      .from('assets')
-      .upload(audioFilename, audioBuffer, {
-        contentType: 'audio/mpeg',
-        upsert: true
-      });
+    // 2. 上传音频到 阿里云 OSS (内存直传，无磁盘写入)
+    console.log("📦 Uploading audio to OSS...");
+    const ossResult = await ossClient.put(audioFilename, audioBuffer);
     
-    if (uploadError) {
-      throw new Error(`Audio Upload Error: ${uploadError.message}`);
-    }
-    
-    const audio_final_url = `${SUPABASE_URL}/storage/v1/object/public/assets/${audioFilename}`;
-    console.log("📦 Audio uploaded:", audio_final_url);
+    // 拿到 OSS URL (支持直连访问)
+    const audio_final_url = ossResult.url.replace('http://', 'https://');
+    console.log("✅ Audio uploaded to OSS:", audio_final_url);
 
     // 3. 调用 VideoRetalk API 合成视频 (Async)
     console.log("🎬 Calling VideoRetalk API...");
