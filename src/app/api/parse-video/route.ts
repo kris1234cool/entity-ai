@@ -2,6 +2,8 @@ import { NextRequest } from 'next/server';
 import OpenAI from 'openai';
 import { createClient } from '@/utils/supabase/server';
 
+export const runtime = 'edge';
+
 // 配置 OpenAI 客户端，兼容 DeepSeek
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -76,73 +78,50 @@ async function transcribeVideoFromSiliconFlow(videoUrl: string): Promise<string>
   }
 
   try {
-    // 获取 MP4 流
-    console.log('📥 正在下载视频...');
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30秒超时
-    
+    // 1. 智能下载: 尝试获取前 10MB (足够 3-5分钟视频)
+    // 多数短视频音频数据都在前部，且 10MB 下载极快
+    console.log('📥 正在下载视频流 (智能范围选择: 0-10MB)...');
     const videoRes = await fetch(videoUrl, {
-      signal: controller.signal,
-      headers: {
+      headers: { 
+        'Range': 'bytes=0-10485760',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      },
+      } 
     });
-    clearTimeout(timeoutId);
-
-    if (!videoRes.ok) {
+    
+    if (!videoRes.ok && videoRes.status !== 206) {
       throw new Error(`无法下载视频: ${videoRes.status}`);
     }
 
-    // 获取 ArrayBuffer
+    // Edge 环境下推荐一次性拿 Buffer (10MB 内存是安全的)
     const arrayBuffer = await videoRes.arrayBuffer();
     const videoSize = (arrayBuffer.byteLength / 1024 / 1024).toFixed(2);
     console.log(`✅ 视频下载完成: ${videoSize} MB`);
 
-    // 创建 FormData
+    // 2. 构造 FormData
     const formData = new FormData();
-    // ✅ 使用 audio/mpeg 类型和 .mp3 后缀，SiliconFlow 更好识别
-    const blob = new Blob([arrayBuffer], { type: 'audio/mpeg' });
-    formData.append('file', blob, 'audio.mp3');
-    // ✅ 必须指定 model 参数，SiliconFlow API 必需
+    // 使用 MP4 blob，SenseVoice 支持视频文件，直接传前 10MB 的内容
+    const blob = new Blob([arrayBuffer], { type: 'video/mp4' });
+    formData.append('file', blob, 'video.mp4');
     formData.append('model', 'FunAudioLLM/SenseVoiceSmall');
 
-    // 发送到 SiliconFlow
-    console.log('🌐 正在上传到 SiliconFlow 进行转录...');
-    console.log('📝 请求地址: https://api.siliconflow.cn/v1/audio/transcriptions');
-    console.log('📦 文件大小:', blob.size, '字节');
-    
-    const transcriptionRes = await fetch(
-      'https://api.siliconflow.cn/v1/audio/transcriptions',
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${siliconflowApiKey}`,
-        },
-        body: formData,
-      }
-    );
+    // 3. 上传 SiliconFlow
+    console.log('🌐 正在上传到 SiliconFlow 进行转录 (Edge Mode)...');
+    const transcriptionRes = await fetch('https://api.siliconflow.cn/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${siliconflowApiKey}`
+      },
+      body: formData,
+    });
 
-    const contentType = transcriptionRes.headers.get('content-type');
-    let transcriptionData;
-    
-    // ✅ 先读取响应体，无论状态码如何
-    try {
-      transcriptionData = await transcriptionRes.json();
-      console.log(`🔥 SiliconFlow 原始响应:`, JSON.stringify(transcriptionData));
-    } catch (e) {
-      const textError = await transcriptionRes.text();
-      console.error('❌ SiliconFlow 响应解析失败:', textError);
-      throw new Error(`SiliconFlow 返回格式错误: ${textError}`);
-    }
+    const transcriptionData = await transcriptionRes.json();
+    console.log(`🔥 SiliconFlow 原始响应:`, JSON.stringify(transcriptionData));
 
-    // ✅ 直接检查 text 字段是否存在（SiliconFlow 直接返回 {"text": "..."}）
     if (transcriptionData.text) {
       console.log(`✅ 转录成功，文本长度: ${transcriptionData.text.length} 字符`);
       return transcriptionData.text;
     }
     
-    // 如果没有 text 字段，才判定为失败
-    console.error('❌ 未找到转录文本，完整响应:', JSON.stringify(transcriptionData));
     throw new Error(`SiliconFlow 未返回转录文本: ${JSON.stringify(transcriptionData)}`);
   } catch (error) {
     console.error('❌ SiliconFlow 转录错误:', error);
