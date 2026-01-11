@@ -41,32 +41,19 @@ function resolveVoiceId(voiceInput: string): string {
 }
 
 /**
- * 文本预处理：将特殊标记转换为自然停顿
- * 注：CosyVoice 目前不支持 SSML，使用文本替代方案
- */
-/**
  * 情感化文本预处理：将标签映射为能够引导 CosyVoice 情感起伏的标点
  */
 function preprocessText(text: string): string {
   let processed = text;
   
-  // 1. 过滤干扰合成的特殊符号 (如音乐符号 🎼)
+  // 1. 过滤干扰合成的特殊符号
   processed = processed.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E6}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F900}-\u{1F9FF}\u{1F3FB}-\u{1F3FF}\u{200D}\u{200B}\u{200E}\u{200F}\u{FE0F}\u{1F000}-\u{1F02B}\u{1F030}-\u{1F093}🎼]/gu, '');
-
+  
   // 2. 情感映射 (利用标点符号控制 prosody)
-  // [停顿] 映射为省略号引导的深层停顿
   processed = processed.replace(/\[停顿\d+(ms|s)\]/g, '…… ');
-  
-  // [吸气] 映射为逗号产生的自然换气
   processed = processed.replace(/\[吸气\]/g, '，');
-  
-  // [思考] [叹气] 映射为破折号产生的语气转折
   processed = processed.replace(/\[(思考|叹气)\]/g, ' —— ');
-  
-  // [重读] 映射为感叹号引导的能量增强
   processed = processed.replace(/\[重读\]/g, '！');
-  
-  // [慢读] 映射为省略号产生的语速放缓
   processed = processed.replace(/\[慢读\]/g, '…… ');
   
   // 3. 规范化处理
@@ -93,7 +80,7 @@ export async function POST(req: Request) {
     const resolvedVoiceId = resolveVoiceId(voice_id);
     const processedText = preprocessText(text);
     
-    // 1. 调用阿里云 TTS REST API (取代 Python 脚本，极速响应)
+    // 1. 调用阿里云 TTS REST API (纯内存流处理，无磁盘IO)
     console.log("🎙️ Generating TTS via REST API...");
     const ttsResponse = await fetch(
       "https://dashscope.aliyuncs.com/api/v1/services/audio/tts/synthesis",
@@ -109,7 +96,8 @@ export async function POST(req: Request) {
           input: { text: processedText },
           parameters: { 
             voice: resolvedVoiceId,
-            format: "mp3" 
+            format: "mp3",
+            sample_rate: 24000
           }
         })
       }
@@ -117,19 +105,21 @@ export async function POST(req: Request) {
 
     if (!ttsResponse.ok) {
       const errorText = await ttsResponse.text();
+      console.error("TTS API Error Details:", errorText);
       throw new Error(`TTS API Error: ${errorText}`);
     }
 
     const audioArrayBuffer = await ttsResponse.arrayBuffer();
+    // 使用 Buffer.from 显式创建内存 Buffer
     const audioBuffer = Buffer.from(audioArrayBuffer);
     const audioFilename = `gen_audio_${Date.now()}.mp3`;
 
-    // 2. 上传音频到 阿里云 OSS (内存直传，无磁盘写入)
-    console.log("📦 Uploading audio to OSS...");
-    const ossResult = await ossClient.put(audioFilename, audioBuffer);
+    // 2. 上传音频到 阿里云 OSS (内存直传，彻底移除 fs 依赖)
+    console.log("📦 Uploading audio to OSS (Memory Mode)...");
+    await ossClient.put(audioFilename, audioBuffer);
     
-    // 拿到 OSS URL (支持直连访问)
-    const audio_final_url = ossResult.url.replace('http://', 'https://');
+    // 构造公网访问 URL
+    const audio_final_url = `https://${OSS_BUCKET}.${OSS_REGION}.aliyuncs.com/${audioFilename}`;
     console.log("✅ Audio uploaded to OSS:", audio_final_url);
 
     // 3. 调用 VideoRetalk API 合成视频 (Async)
@@ -158,6 +148,7 @@ export async function POST(req: Request) {
 
     if (!videoResponse.ok) {
       const errorText = await videoResponse.text();
+      console.error("VideoRetalk API Error Details:", errorText);
       throw new Error(`Aliyun VideoRetalk API Error: ${errorText}`);
     }
     
