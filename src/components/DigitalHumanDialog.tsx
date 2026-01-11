@@ -5,6 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { createClient } from '@/utils/supabase/client';
+import OSS from 'ali-oss';
 
 interface DigitalHumanDialogProps {
   isOpen: boolean;
@@ -29,16 +30,38 @@ type VoiceSource = 'custom' | 'system';
 const POLL_INTERVAL = 3000; // 3秒
 const MAX_POLL_ATTEMPTS = 200; // 最多轮询 10 分钟 (适配长文案)
 
-// 系统预设音色库 - 3男3女 核心品牌音色
-const SYSTEM_VOICES = [
-  // 女声
-  { id: 'longxiaochun', name: '雅雅', tag: '旗舰', desc: '全能商业', icon: '👑', gender: 'female' },
-  { id: 'longxiaowan', name: '小娩', tag: '热粉', desc: '元气少女', icon: '💗', gender: 'female' },
-  { id: 'longyebai', name: '白白', tag: '柔情', desc: '温柔邻家', icon: '🌸', gender: 'female' },
-  // 男声
-  { id: 'longcheng', name: '严选男声', tag: '至尊', desc: '睿智精英', icon: '👔', gender: 'male' },
-  { id: 'longlaotie', name: '老铁', tag: '接地', desc: '东北大哥', icon: '🍺', gender: 'male' },
-  { id: 'longfei', name: '龙飞', tag: '硬核', desc: '铁血真男', icon: '💪', gender: 'male' },
+// 音色分类数据结构
+const VOICE_CATEGORIES = [
+  {
+    id: 'mandarin',
+    label: '🇨🇳 通用国语',
+    voices: [
+      { id: 'longanyang', name: '阳光男孩·安洋', tags: ['阳光', '20-30岁'], gender: 'male', icon: '👦' },
+      { id: 'longze_v3', name: '温暖元气·龙泽', tags: ['温暖', '25-30岁'], gender: 'male', icon: '☀️' },
+      { id: 'longhan_v3', name: '温暖痴情·龙寒', tags: ['深情', '30-35岁'], gender: 'male', icon: '❤️' },
+      { id: 'longanling_v3', name: '思维灵动·安灵', tags: ['灵动', '20-30岁'], gender: 'female', icon: '💡' },
+      { id: 'longxing_v3', name: '温婉邻家·龙星', tags: ['甜美', '20-25岁'], gender: 'female', icon: '✨' },
+      { id: 'longwan_v3', name: '细腻柔声·龙婉', tags: ['温柔', '20-30岁'], gender: 'female', icon: '🍃' },
+      { id: 'longqiang_v3', name: '浪漫风情·龙嫱', tags: ['御姐', '30-35岁'], gender: 'female', icon: '🌹' },
+      { id: 'longanhuan', name: '欢脱元气·安欢', tags: ['活泼', '20-30岁'], gender: 'female', icon: '🎉' }
+    ]
+  },
+  {
+    id: 'dialect',
+    label: '🇭🇰 特色方言',
+    voices: [
+      { id: 'longjiayi_v3', name: '知性粤语·嘉怡', tags: ['粤语', '知性'], gender: 'female', icon: '🍵' },
+      { id: 'longanyue_v3', name: '欢脱粤语·安粤', tags: ['粤语', '欢脱'], gender: 'male', icon: '🏮' }
+    ]
+  },
+  {
+    id: 'global',
+    label: '🌏 国际出海',
+    voices: [
+      { id: 'loongkyong_v3', name: '韩语甜心·Kyong', tags: ['韩语', '25-30岁'], gender: 'female', icon: '🇰🇷' },
+      { id: 'loongtomoka_v3', name: '日语元气·Tomoka', tags: ['日语', '30-35岁'], gender: 'female', icon: '🇯🇵' }
+    ]
+  }
 ];
 
 // SSML 标签工具按钮配置
@@ -60,6 +83,7 @@ export default function DigitalHumanDialog({
   const [assets, setAssets] = useState<DigitalAssets | null>(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState<UploadType>(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [generating, setGenerating] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -73,12 +97,22 @@ export default function DigitalHumanDialog({
   
   // 声音来源相关状态
   const [voiceSource, setVoiceSource] = useState<VoiceSource>('system'); // 默认使用系统音色
-  const [selectedSystemVoice, setSelectedSystemVoice] = useState(SYSTEM_VOICES[0].id);
+  const [activeCategory, setActiveCategory] = useState(VOICE_CATEGORIES[0].id);
+  const [selectedSystemVoice, setSelectedSystemVoice] = useState(VOICE_CATEGORIES[0].voices[0].id);
   
   const audioInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const supabase = createClient();
+
+  // 初始化 OSS 客户端 (Environment Variables)
+  const ossClient = new OSS({
+    region: process.env.NEXT_PUBLIC_OSS_REGION!,
+    accessKeyId: process.env.NEXT_PUBLIC_OSS_ACCESS_KEY_ID!,
+    accessKeySecret: process.env.NEXT_PUBLIC_OSS_ACCESS_KEY_SECRET!,
+    bucket: process.env.NEXT_PUBLIC_OSS_BUCKET!,
+    secure: true,
+  });
 
   // 在光标位置插入文本
   const insertAtCursor = (insertText: string) => {
@@ -231,32 +265,26 @@ export default function DigitalHumanDialog({
     }
   };
 
-  // 上传文件到 Supabase Storage
-  const uploadToStorage = async (file: File, folder: string): Promise<string> => {
-    const ext = file.name.split('.').pop();
-    const filename = `${folder}/${userId}_${Date.now()}.${ext}`;
-    
-    const { error } = await supabase.storage
-      .from('assets')
-      .upload(filename, file, { upsert: true });
-    
-    if (error) throw new Error(`上传失败: ${error.message}`);
-    
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    return `${supabaseUrl}/storage/v1/object/public/assets/${filename}`;
-  };
-
-  // 处理音频上传 (复刻声音)
+  // 处理音频上传 (复刻声音) - 改用 OSS 直传
   const handleAudioUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setUploading('audio');
+    setUploadProgress(0);
     setError(null);
     
     try {
-      // 1. 上传到 Supabase Storage
-      const audioUrl = await uploadToStorage(file, 'voice_samples');
+      // 1. 直传到 阿里云 OSS
+      const filename = `uploads/audio_${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
+      const result = await ossClient.multipartUpload(filename, file, {
+        progress: (p) => {
+          setUploadProgress(Math.round(p * 100));
+        }
+      });
+      
+      const audioUrl = `https://${process.env.NEXT_PUBLIC_OSS_BUCKET}.${process.env.NEXT_PUBLIC_OSS_REGION}.aliyuncs.com/${result.name}`;
+      console.log('🎙️ OSS 音频上传成功:', audioUrl);
       
       // 2. 调用 API 复刻声音
       const res = await fetch('/api/digital-assets', {
@@ -271,36 +299,39 @@ export default function DigitalHumanDialog({
       // 3. 刷新资产
       await loadAssets();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : '声音复刻失败';
+      const msg = err instanceof Error ? err.message : '网络中断，请重试';
       setError(msg);
     } finally {
       setUploading(null);
+      setUploadProgress(0);
       if (audioInputRef.current) audioInputRef.current.value = '';
     }
   };
 
-  // 处理视频上传
+  // 处理视频上传 - 改用 OSS 分片直传 (突破 50MB 限制)
   const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // 文件大小限制 50MB
-    const MAX_SIZE_MB = 50;
-    if (file.size > MAX_SIZE_MB * 1024 * 1024) {
-      setError(`视频文件过大，请压缩后重试（最大 ${MAX_SIZE_MB}MB，当前 ${(file.size / 1024 / 1024).toFixed(1)}MB）`);
-      if (videoInputRef.current) videoInputRef.current.value = '';
-      return;
-    }
-
     setUploading('video');
+    setUploadProgress(0);
     setError(null);
     
     try {
-      // 1. 上传到 Supabase Storage
-      const videoUrl = await uploadToStorage(file, 'base_videos');
-      console.log('🎥 新视频上传成功:', videoUrl);
+      // 1. 直传到 阿里云 OSS (使用分片上传)
+      const filename = `uploads/${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
       
-      // 2. 更新资产
+      const result = await ossClient.multipartUpload(filename, file, {
+        progress: (p) => {
+          setUploadProgress(Math.round(p * 100));
+        }
+      });
+      
+      // 拼接公网 URL
+      const videoUrl = `https://${process.env.NEXT_PUBLIC_OSS_BUCKET}.${process.env.NEXT_PUBLIC_OSS_REGION}.aliyuncs.com/${result.name}`;
+      console.log('🎥 OSS 视频上传成功:', videoUrl);
+      
+      // 2. 更新资产到数据库
       const res = await fetch('/api/digital-assets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -315,10 +346,12 @@ export default function DigitalHumanDialog({
       await loadAssets();
       console.log('✅ 资产已刷新');
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : '视频上传失败';
+      console.error('OSS Upload Error:', err);
+      const msg = err instanceof Error ? err.message : '网络中断，请重试';
       setError(msg);
     } finally {
       setUploading(null);
+      setUploadProgress(0);
       if (videoInputRef.current) videoInputRef.current.value = '';
     }
   };
@@ -384,7 +417,7 @@ export default function DigitalHumanDialog({
 
     // 根据声音来源选择参数
     const voiceId = voiceSource === 'custom' ? assets.voice_id : selectedSystemVoice;
-    const model = voiceSource === 'custom' ? 'cosyvoice-v3-plus' : 'cosyvoice-v1';
+    const model = voiceSource === 'custom' ? 'cosyvoice-v3-plus' : 'cosyvoice-v3-flash';
 
     // 🚨 关键调试点：打印将要使用的视频URL
     console.log('🚀 生成视频使用的 video_url:', assets.default_video_url);
@@ -564,53 +597,67 @@ export default function DigitalHumanDialog({
                 </div>
               </div>
 
-              {/* 系统音色选择 - 2列3行卡片布局 */}
+              {/* 系统音色选择 - 多维分类面板 */}
               {voiceSource === 'system' && (
-                <div className="p-3 bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl border border-indigo-200">
-                  <div className="grid grid-cols-2 gap-2">
-                    {SYSTEM_VOICES.map((voice) => (
+                <div className="space-y-3">
+                  {/* 分类 Tabs */}
+                  <div className="flex gap-1 p-1 bg-slate-100 rounded-lg overflow-x-auto no-scrollbar">
+                    {VOICE_CATEGORIES.map((cat) => (
                       <button
-                        key={voice.id}
-                        onClick={() => setSelectedSystemVoice(voice.id)}
-                        className={`relative flex flex-col items-center p-3 rounded-xl transition-all ${
-                          selectedSystemVoice === voice.id
-                            ? 'bg-gradient-to-br from-indigo-600 to-purple-600 text-white shadow-lg scale-[1.02]'
-                            : 'bg-white text-slate-700 hover:bg-white hover:shadow-md border border-slate-200/50'
+                        key={cat.id}
+                        onClick={() => setActiveCategory(cat.id)}
+                        className={`whitespace-nowrap flex-1 py-1.5 px-3 rounded-md text-xs font-medium transition-all ${
+                          activeCategory === cat.id
+                            ? 'bg-white text-indigo-600 shadow-sm'
+                            : 'text-slate-500 hover:text-slate-700'
                         }`}
                       >
-                        {/* 标签 */}
-                        <span className={`absolute -top-1 -right-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
-                          selectedSystemVoice === voice.id
-                            ? 'bg-yellow-400 text-yellow-900'
-                            : voice.tag === '旗舰' ? 'bg-amber-100 text-amber-700'
-                            : voice.tag === '至尊' ? 'bg-purple-100 text-purple-700'
-                            : voice.tag === '热粉' ? 'bg-pink-100 text-pink-700'
-                            : voice.tag === '柔情' ? 'bg-rose-100 text-rose-700'
-                            : voice.tag === '博学' ? 'bg-blue-100 text-blue-700'
-                            : 'bg-slate-100 text-slate-700'
-                        }`}>
-                          {voice.tag}
-                        </span>
-                        {/* 图标 */}
-                        <span className="text-2xl mb-1">{voice.icon}</span>
-                        {/* 名称 */}
-                        <p className={`text-sm font-semibold ${
-                          selectedSystemVoice === voice.id ? 'text-white' : 'text-slate-800'
-                        }`}>
-                          {voice.name}
-                        </p>
-                        {/* 描述 */}
-                        <p className={`text-[10px] ${
-                          selectedSystemVoice === voice.id ? 'text-indigo-100' : 'text-slate-400'
-                        }`}>
-                          {voice.desc}
-                        </p>
-                        {/* 选中标记 */}
-                        {selectedSystemVoice === voice.id && (
-                          <span className="absolute bottom-1 right-1 text-white/80 text-xs">✓</span>
-                        )}
+                        {cat.label}
                       </button>
                     ))}
+                  </div>
+
+                  {/* 音色网格布局 */}
+                  <div className="p-3 bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl border border-indigo-100">
+                    <div className="grid grid-cols-2 gap-2">
+                      {VOICE_CATEGORIES.find(c => c.id === activeCategory)?.voices.map((voice) => (
+                        <button
+                          key={voice.id}
+                          onClick={() => setSelectedSystemVoice(voice.id)}
+                          className={`relative flex flex-col items-center p-3 rounded-xl transition-all ${
+                            selectedSystemVoice === voice.id
+                              ? 'bg-white border-2 border-indigo-500 shadow-md scale-[1.02]'
+                              : 'bg-white/60 border border-slate-200/50 hover:bg-white hover:shadow-sm'
+                          }`}
+                        >
+                          <span className="text-2xl mb-1">{voice.icon}</span>
+                          <p className={`text-xs font-bold truncate w-full text-center ${
+                            selectedSystemVoice === voice.id ? 'text-indigo-600' : 'text-slate-800'
+                          }`}>
+                            {voice.name}
+                          </p>
+                          <div className="flex flex-wrap justify-center gap-1 mt-1">
+                            {voice.tags.map(tag => (
+                              <span key={tag} className="text-[9px] px-1 py-0.5 bg-slate-100 text-slate-500 rounded">
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                          {selectedSystemVoice === voice.id && (
+                            <div className="absolute top-1 right-1">
+                              <span className="flex h-4 w-4 items-center justify-center rounded-full bg-indigo-600 text-[10px] text-white">✓</span>
+                            </div>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* 提示文案 */}
+                    {(activeCategory === 'dialect' || activeCategory === 'global') && (
+                      <p className="mt-3 text-[10px] text-indigo-500 bg-indigo-50/50 p-2 rounded-lg border border-indigo-100/50 leading-relaxed">
+                        💡 提示：选择外语/方言音色时，输入中文文案也能生成，但为了最地道的口音，建议输入对应语言的文本。
+                      </p>
+                    )}
                   </div>
                 </div>
               )}
@@ -629,9 +676,18 @@ export default function DigitalHumanDialog({
                   />
                   <p className="text-xs text-purple-500 mt-2">建议上传清晰的 10-30 秒语音</p>
                   {uploading === 'audio' && (
-                    <p className="text-xs text-purple-600 mt-2 flex items-center gap-1">
-                      <span className="animate-spin">⏳</span> 声音复刻中，请稍候...
-                    </p>
+                    <div className="mt-2 space-y-1">
+                      <div className="flex justify-between text-xs text-purple-600">
+                        <span>{uploadProgress < 100 ? '正在上传音频...' : '音频上传完成，正在复刻声音...'}</span>
+                        <span>{uploadProgress}%</span>
+                      </div>
+                      <div className="w-full bg-purple-100 rounded-full h-1.5">
+                        <div 
+                          className="bg-purple-600 h-1.5 rounded-full transition-all duration-300" 
+                          style={{ width: `${uploadProgress}%` }}
+                        ></div>
+                      </div>
+                    </div>
                   )}
                   {hasCustomVoice ? (
                     <p className="text-xs text-green-600 mt-2">✅ 声音已克隆就绪</p>
@@ -669,9 +725,18 @@ export default function DigitalHumanDialog({
                   </>
                 )}
                 {uploading === 'video' && (
-                  <p className="text-xs text-slate-600 mt-2 flex items-center gap-1">
-                    <span className="animate-spin">⏳</span> 视频上传中...
-                  </p>
+                  <div className="mt-2 space-y-1">
+                    <div className="flex justify-between text-xs text-slate-600">
+                      <span>正在上传视频...</span>
+                      <span>{uploadProgress}%</span>
+                    </div>
+                    <div className="w-full bg-slate-200 rounded-full h-1.5">
+                      <div 
+                        className="bg-indigo-600 h-1.5 rounded-full transition-all duration-300" 
+                        style={{ width: `${uploadProgress}%` }}
+                      ></div>
+                    </div>
+                  </div>
                 )}
               </div>
 

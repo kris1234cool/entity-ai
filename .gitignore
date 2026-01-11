@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# 🔒 Local System Assets & Documentation
+SYSTEM_ASSETS.md
+SYSTEM_ASSETS.*
+ENV_GUIDE.md
