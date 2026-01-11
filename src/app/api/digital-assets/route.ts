@@ -1,11 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { exec } from 'child_process';
-import util from 'util';
-import path from 'path';
 
-const execPromise = util.promisify(exec);
-export const runtime = 'nodejs';
+export const runtime = 'edge';
 
 // 环境变量
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -94,33 +90,47 @@ export async function POST(req: Request) {
         updateData.voice_id = existing.voice_id;
       }
     } else if (type === 'audio') {
-      // 调用 Python 脚本复刻 Voice ID
-      const scriptPath = path.join(process.cwd(), 'scripts', 'enroll_voice.py');
+      // 调用阿里云 DashScope REST API 进行声音复刻 (取代 Python 脚本)
+      console.log("🎙️ Enrolling Voice via REST API...");
+      
       // prefix 只能包含英文字母和数字，移除所有特殊字符
       const safeUserId = userId.replace(/[^a-zA-Z0-9]/g, '');
       const prefix = `u${safeUserId.substring(0, 8)}`;
-      const command = `python3 "${scriptPath}" "${url}" "${prefix}"`;
       
-      console.log("🎙️ Enrolling Voice...");
-      console.log("Command:", command);
+      const enrollResponse = await fetch(
+        "https://dashscope.aliyuncs.com/api/v1/services/audio/voice-cloning/enroll",
+        {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${DASHSCOPE_API_KEY}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            model: "cosyvoice-v3-plus",
+            input: {
+              prefix: prefix,
+              url: url
+            },
+            parameters: {
+              language_hints: ["zh"]
+            }
+          })
+        }
+      );
+
+      if (!enrollResponse.ok) {
+        const errorText = await enrollResponse.text();
+        throw new Error(`Voice Enrollment API Error: ${errorText}`);
+      }
+
+      const enrollData = await enrollResponse.json();
+      console.log("✅ Voice enrolled:", enrollData.output?.voice_id);
       
-      const { stdout, stderr } = await execPromise(command, { 
-        env: { ...process.env, DASHSCOPE_API_KEY } 
-      });
-      
-      console.log("stdout:", stdout);
-      if (stderr) console.log("stderr:", stderr);
-      
-      if (!stdout.includes("SUCCESS:")) {
-        throw new Error(`Voice Enrollment Failed: ${stderr || stdout}`);
+      if (!enrollData.output?.voice_id) {
+        throw new Error(`Voice Enrollment failed: ${JSON.stringify(enrollData)}`);
       }
       
-      // 解析输出 SUCCESS:voice_id
-      const match = stdout.match(/SUCCESS:(.+)/);
-      if (!match) {
-        throw new Error("Invalid output from Python script");
-      }
-      updateData.voice_id = match[1].trim();
+      updateData.voice_id = enrollData.output.voice_id;
       // 保留原有的 video_url
       if (existing?.default_video_url) {
         updateData.default_video_url = existing.default_video_url;
