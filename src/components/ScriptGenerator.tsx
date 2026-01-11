@@ -60,7 +60,20 @@ export default function ScriptGenerator({ shopProfile, onClose }: ScriptGenerato
         throw new Error(error.error || '生成灵感失败');
       }
 
-      const result: IdeasResult = await response.json();
+      // 处理流式响应
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('无法读取响应流');
+
+      let accumulated = '';
+      const decoder = new TextDecoder();
+      
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        accumulated += decoder.decode(value);
+      }
+
+      const result: IdeasResult = JSON.parse(accumulated);
       setIdeas(result);
       setStep('ideas_generated');
     } catch (error) {
@@ -75,6 +88,9 @@ export default function ScriptGenerator({ shopProfile, onClose }: ScriptGenerato
   const handleHookClick = async (hook: string) => {
     setSelectedHook(hook);
     setLoading(true);
+    setGeneratedScript({ content: '' }); // 初始化为空，准备接收流
+    setStep('script_generated'); // 立即切换到显示页面，看到打字机效果
+
     try {
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
@@ -100,12 +116,25 @@ export default function ScriptGenerator({ shopProfile, onClose }: ScriptGenerato
         throw new Error(`脚本生成失败: ${response.statusText}`);
       }
 
-      const result = await response.json();
-      setGeneratedScript(result);
-      setStep('script_generated');
+      // 处理流式响应
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('无法读取响应流');
+
+      const decoder = new TextDecoder();
+      let fullContent = '';
+      
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        const chunk = decoder.decode(value);
+        fullContent += chunk;
+        setGeneratedScript({ content: fullContent });
+      }
     } catch (error) {
       console.error('生成脚本时出错:', error);
       alert('生成脚本时出现错误，请稍后重试');
+      setStep('ideas_generated'); // 失败则退回
     } finally {
       setLoading(false);
     }

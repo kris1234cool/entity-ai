@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-export const runtime = 'nodejs';
+export const runtime = 'edge';
 
 const DASHSCOPE_API_KEY = process.env.DASHSCOPE_API_KEY!;
 
