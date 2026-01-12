@@ -17,7 +17,7 @@ RUN npm ci
 COPY . .
 
 # Build Next.js application
-RUN npm run build
+RUN npx next build --webpack
 
 # Expose port 3000
 EXPOSE 3000
