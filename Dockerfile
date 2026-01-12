@@ -1,8 +1,9 @@
 FROM node:20-bullseye
 
-# Install FFmpeg (required for video processing)
+# Install FFmpeg and Python dependencies (required for video processing and TTS)
 RUN apt-get update && \
-    apt-get install -y ffmpeg && \
+    apt-get install -y ffmpeg python3-pip && \
+    pip3 install dashscope oss2 && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
