@@ -180,11 +180,14 @@ export default function SoraVideoDialog({
             console.log('🔍 Task Status:', status);
 
             if (status === 'completed') {
+                // 确保 Result 存在，防止崩溃
+                const result = data.data?.result || data.result;
+                if (!result) {
+                    throw new Error('API 返回 status=completed 但缺少 result 数据');
+                }
+
                 // 视频 URL 在 data.result.videos[0].url[0] 或 data.result.videos[0].url (如果是字符串)
-                const videoUrl = data.data?.result?.videos?.[0]?.url?.[0] ||
-                    data.data?.result?.videos?.[0]?.url ||
-                    data.result?.videos?.[0]?.url?.[0] ||
-                    data.result?.videos?.[0]?.url;
+                const videoUrl = result.videos?.[0]?.url?.[0] || result.videos?.[0]?.url;
 
                 console.log('🎥 Extracted Video URL:', videoUrl);
 
@@ -199,10 +202,23 @@ export default function SoraVideoDialog({
                     console.error('❌ Status completed but no video URL found:', data);
                     throw new Error('视频生成完成但未找到视频链接');
                 }
-            } else if (status === 'failed') {
-                const errorMsg = data.error || data.message || data.data?.error || '生成失败';
-                toast.error('生成失败', { description: errorMsg });
-                throw new Error(errorMsg);
+            } else if (status === 'failed' || status === 'failure') {
+                // 🛑 核心修复：捕获失败状态，防止崩溃
+                console.error('❌ Task Failed:', data);
+
+                // 尝试提取后端透传的错误信息 (APIMart 通常在 result.message 或 error 中)
+                // 结构可能是: { result: "xxx error" } 或 { error: "xxx" } 或 { message: "xxx" }
+                const errorResult = data.data?.result || data.result;
+                const errorMsg = (typeof errorResult === 'string' ? errorResult : errorResult?.message) ||
+                    data.error ||
+                    data.message ||
+                    data.data?.error ||
+                    "生成失败，请检查图片是否合规";
+
+                setGenerating(false);
+                setError(errorMsg); // 显示在 UI 上
+                toast.error('任务失败', { description: errorMsg }); // Toast 提示
+                return; // 停止轮询
             }
 
             // 继续轮询
