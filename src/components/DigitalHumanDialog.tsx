@@ -105,14 +105,8 @@ export default function DigitalHumanDialog({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const supabase = createClient();
 
-  // 初始化 OSS 客户端 (Environment Variables)
-  const ossClient = new OSS({
-    region: process.env.NEXT_PUBLIC_OSS_REGION!,
-    accessKeyId: process.env.NEXT_PUBLIC_OSS_ACCESS_KEY_ID!,
-    accessKeySecret: process.env.NEXT_PUBLIC_OSS_ACCESS_KEY_SECRET!,
-    bucket: process.env.NEXT_PUBLIC_OSS_BUCKET!,
-    secure: true,
-  });
+  // OSS 客户端 ref（避免 SSR 错误）
+  const ossClientRef = useRef<any>(null);
 
   // 在光标位置插入文本
   const insertAtCursor = (insertText: string) => {
@@ -166,6 +160,20 @@ export default function DigitalHumanDialog({
   const hasVideo = !!assets?.default_video_url;
   const hasCustomVoice = !!assets?.voice_id;
   const canGenerate = hasVideo && (voiceSource === 'system' || hasCustomVoice);
+
+  // 初始化 OSS 客户端（仅在浏览器端）
+  useEffect(() => {
+    if (typeof window !== 'undefined' && !ossClientRef.current) {
+      const OSS = require('ali-oss');
+      ossClientRef.current = new OSS({
+        region: process.env.NEXT_PUBLIC_OSS_REGION!,
+        accessKeyId: process.env.NEXT_PUBLIC_OSS_ACCESS_KEY_ID!,
+        accessKeySecret: process.env.NEXT_PUBLIC_OSS_ACCESS_KEY_SECRET!,
+        bucket: process.env.NEXT_PUBLIC_OSS_BUCKET!,
+        secure: true,
+      });
+    }
+  }, []);
 
   // 加载用户资产
   useEffect(() => {
@@ -277,8 +285,8 @@ export default function DigitalHumanDialog({
     try {
       // 1. 直传到 阿里云 OSS
       const filename = `uploads/audio_${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
-      const result = await ossClient.multipartUpload(filename, file, {
-        progress: (p) => {
+      const result = await ossClientRef.current.multipartUpload(filename, file, {
+        progress: (p: number) => {
           setUploadProgress(Math.round(p * 100));
         }
       });
@@ -321,8 +329,8 @@ export default function DigitalHumanDialog({
       // 1. 直传到 阿里云 OSS (使用分片上传)
       const filename = `uploads/${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
 
-      const result = await ossClient.multipartUpload(filename, file, {
-        progress: (p) => {
+      const result = await ossClientRef.current.multipartUpload(filename, file, {
+        progress: (p: number) => {
           setUploadProgress(Math.round(p * 100));
         }
       });
@@ -363,13 +371,15 @@ export default function DigitalHumanDialog({
     try {
       setStatusText('正在准备下载...');
 
-      // 🔒 检查 1: 确保使用 HTTPS
-      if (finalVideoUrl.startsWith('http://')) {
-        throw new Error('⚠️ 安全警告：视频 URL 使用 HTTP 协议，请联系开发者修改为 HTTPS');
+      // ✅ 自动升级 HTTP 为 HTTPS（阿里云 OSS 默认支持 HTTPS）
+      let secureUrl = finalVideoUrl;
+      if (secureUrl.startsWith('http://')) {
+        secureUrl = secureUrl.replace('http://', 'https://');
+        console.log('🔒 自动升级为 HTTPS:', secureUrl);
       }
 
       // 通过 fetch 获取视频
-      const response = await fetch(finalVideoUrl);
+      const response = await fetch(secureUrl);
 
       // 🛑 检查 2: CORS 错误检测
       if (!response.ok) {
@@ -619,8 +629,8 @@ export default function DigitalHumanDialog({
                   <button
                     onClick={() => setVoiceSource('system')}
                     className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-all ${voiceSource === 'system'
-                        ? 'bg-white text-indigo-600 shadow-sm'
-                        : 'text-slate-600 hover:text-slate-800'
+                      ? 'bg-white text-indigo-600 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-800'
                       }`}
                   >
                     🎧 系统推荐
@@ -628,8 +638,8 @@ export default function DigitalHumanDialog({
                   <button
                     onClick={() => setVoiceSource('custom')}
                     className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-all ${voiceSource === 'custom'
-                        ? 'bg-white text-purple-600 shadow-sm'
-                        : 'text-slate-600 hover:text-slate-800'
+                      ? 'bg-white text-purple-600 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-800'
                       }`}
                   >
                     📂 我的声音
@@ -647,8 +657,8 @@ export default function DigitalHumanDialog({
                         key={cat.id}
                         onClick={() => setActiveCategory(cat.id)}
                         className={`whitespace-nowrap flex-1 py-1.5 px-3 rounded-md text-xs font-medium transition-all ${activeCategory === cat.id
-                            ? 'bg-white text-indigo-600 shadow-sm'
-                            : 'text-slate-500 hover:text-slate-700'
+                          ? 'bg-white text-indigo-600 shadow-sm'
+                          : 'text-slate-500 hover:text-slate-700'
                           }`}
                       >
                         {cat.label}
@@ -664,8 +674,8 @@ export default function DigitalHumanDialog({
                           key={voice.id}
                           onClick={() => setSelectedSystemVoice(voice.id)}
                           className={`relative flex flex-col items-center p-3 rounded-xl transition-all ${selectedSystemVoice === voice.id
-                              ? 'bg-white border-2 border-indigo-500 shadow-md scale-[1.02]'
-                              : 'bg-white/60 border border-slate-200/50 hover:bg-white hover:shadow-sm'
+                            ? 'bg-white border-2 border-indigo-500 shadow-md scale-[1.02]'
+                            : 'bg-white/60 border border-slate-200/50 hover:bg-white hover:shadow-sm'
                             }`}
                         >
                           <span className="text-2xl mb-1">{voice.icon}</span>
