@@ -7,6 +7,7 @@ import AgentChatDialog from '@/components/AgentChatDialog';
 import ScriptGenerator from '@/components/ScriptGenerator';
 import ViralRewriteDialog from '@/components/ViralRewriteDialog';
 import DigitalHumanDialog from '@/components/DigitalHumanDialog';
+import SoraVideoDialog from '@/components/SoraVideoDialog'; // New
 import { useAuth } from '@/components/auth/AuthWrapper';
 import { useProject } from '@/contexts/ProjectContext';
 import { useRouter } from 'next/navigation';
@@ -17,6 +18,7 @@ export default function Dashboard() {
   const [selectedScriptType, setSelectedScriptType] = useState<ScriptType | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isDigitalHumanOpen, setIsDigitalHumanOpen] = useState(false);
+  const [soraDialogType, setSoraDialogType] = useState<'store' | 'product' | null>(null); // New State
   const { user, profile, loading: authLoading } = useAuth();
   const { activeProject, loading: projectLoading } = useProject();
   const router = useRouter();
@@ -38,14 +40,14 @@ export default function Dashboard() {
       alert('请解锁 VIP 畷享全能导演模式！');
       return;
     }
-  
+
     // 灵感一闪特殊处理：不需要店铺档案
     if (scriptType === '✨ 灵感一闪') {
       setSelectedScriptType(scriptType);
       setIsDialogOpen(true);
       return;
     }
-  
+
     if (!activeProject) {
       // 如果没有活跳档案，提示用户先创建
       alert('请先在"我的"页面创建或选择一个店铺档案');
@@ -106,54 +108,50 @@ export default function Dashboard() {
             <div className="text-center">
               <h2 className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-4">选择脚本类型</h2>
             </div>
-            
+
             {/* Vertical Stack Layout - One Card Per Row */}
             <div className="flex flex-col gap-3">
               {Object.entries(AGENT_CONFIG).map(([scriptType, config], index) => {
                 const isLocked = lockedScriptTypes.includes(scriptType as ScriptType);
                 const isFirstOption = index === 0;
-                
+
                 return (
                   <button
                     key={config.id}
                     onClick={() => handleScriptTypeClick(scriptType as ScriptType)}
                     disabled={isLocked}
-                    className={`relative backdrop-blur-xl border shadow-[0_8px_32px_0_rgba(31,38,135,0.07)] hover:shadow-[0_8px_32px_0_rgba(31,38,135,0.15)] transition-all duration-500 rounded-[28px] py-4 px-5 text-left group active:scale-[0.97] ${
-                      isFirstOption
-                        ? 'bg-gradient-to-r from-amber-50 to-yellow-50 border-yellow-300/50 hover:border-yellow-400 hover:shadow-[0_8px_32px_0_rgba(180,83,9,0.15)]'
-                        : isLocked
+                    className={`relative backdrop-blur-xl border shadow-[0_8px_32px_0_rgba(31,38,135,0.07)] hover:shadow-[0_8px_32px_0_rgba(31,38,135,0.15)] transition-all duration-500 rounded-[28px] py-4 px-5 text-left group active:scale-[0.97] ${isFirstOption
+                      ? 'bg-gradient-to-r from-amber-50 to-yellow-50 border-yellow-300/50 hover:border-yellow-400 hover:shadow-[0_8px_32px_0_rgba(180,83,9,0.15)]'
+                      : isLocked
                         ? 'bg-gray-100/50 border-gray-200/50 opacity-60 cursor-not-allowed'
                         : 'bg-white/40 border-white/60 hover:shadow-[0_8px_32px_0_rgba(31,38,135,0.15)]'
-                    }`}
+                      }`}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-4">
                         {/* Glass Circle Icon */}
-                        <div className={`w-11 h-11 rounded-2xl backdrop-blur-md border flex items-center justify-center text-2xl shadow-sm group-hover:scale-110 group-hover:rotate-3 transition-transform flex-shrink-0 ${
-                          isFirstOption
-                            ? 'bg-yellow-100/60 border-yellow-300/80'
-                            : isLocked
+                        <div className={`w-11 h-11 rounded-2xl backdrop-blur-md border flex items-center justify-center text-2xl shadow-sm group-hover:scale-110 group-hover:rotate-3 transition-transform flex-shrink-0 ${isFirstOption
+                          ? 'bg-yellow-100/60 border-yellow-300/80'
+                          : isLocked
                             ? 'bg-gray-200/60 border-gray-300/50'
                             : 'bg-white/60 border-white/80'
-                        }`}>
+                          }`}>
                           {config.icon}
                         </div>
                         {/* Title + Subtitle */}
                         <div>
-                          <h4 className={`font-bold text-[16px] mb-0.5 tracking-tight ${
-                            isFirstOption
-                              ? 'text-amber-900'
-                              : isLocked
+                          <h4 className={`font-bold text-[16px] mb-0.5 tracking-tight ${isFirstOption
+                            ? 'text-amber-900'
+                            : isLocked
                               ? 'text-gray-500'
                               : 'text-slate-900'
-                          }`}>{scriptType}</h4>
-                          <p className={`text-[12px] font-medium leading-tight opacity-80 ${
-                            isFirstOption
-                              ? 'text-amber-700'
-                              : isLocked
+                            }`}>{scriptType}</h4>
+                          <p className={`text-[12px] font-medium leading-tight opacity-80 ${isFirstOption
+                            ? 'text-amber-700'
+                            : isLocked
                               ? 'text-gray-400'
                               : 'text-slate-500'
-                          }`}>{config.description}</p>
+                            }`}>{config.description}</p>
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
@@ -163,14 +161,12 @@ export default function Dashboard() {
                         )}
                         {/* Arrow Icon for Unlocked Options */}
                         {!isLocked && (
-                          <div className={`w-7 h-7 rounded-full flex items-center justify-center ${
-                            isFirstOption
-                              ? 'bg-yellow-100/60 opacity-100'
-                              : 'bg-white/40 opacity-0 group-hover:opacity-100'
-                          } transition-opacity`}>
-                            <svg className={`w-4 h-4 ${
-                              isFirstOption ? 'text-amber-600' : 'text-slate-400'
-                            }`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <div className={`w-7 h-7 rounded-full flex items-center justify-center ${isFirstOption
+                            ? 'bg-yellow-100/60 opacity-100'
+                            : 'bg-white/40 opacity-0 group-hover:opacity-100'
+                            } transition-opacity`}>
+                            <svg className={`w-4 h-4 ${isFirstOption ? 'text-amber-600' : 'text-slate-400'
+                              }`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M9 5l7 7-7 7" />
                             </svg>
                           </div>
@@ -215,14 +211,14 @@ export default function Dashboard() {
                 </div>
               </button>
             </div>
-            
+
             {/* 数字人对话框 */}
             <DigitalHumanDialog
               isOpen={isDigitalHumanOpen}
               onClose={() => setIsDigitalHumanOpen(false)}
               userId={user?.id || 'anonymous'}
             />
-            
+
             {/* 爆款仿写 - 特殊处理 */}
             {selectedScriptType === '爆款仿写' && (
               <ViralRewriteDialog
@@ -239,6 +235,50 @@ export default function Dashboard() {
                 onClose={handleCloseDialog}
                 scriptType={selectedScriptType}
                 shopProfile={activeProject}
+              />
+            )}
+
+            {/* Sora-2 视频生成入口 (Grid Layout) */}
+            <div className="grid grid-cols-2 gap-3 mt-4 mb-8">
+              {/* Card A: 实景门店探店 */}
+              <button
+                onClick={() => setSoraDialogType('store')}
+                className="relative backdrop-blur-xl border border-indigo-200 shadow-sm hover:shadow-md transition-all rounded-[24px] p-4 text-left group active:scale-[0.98] bg-gradient-to-br from-indigo-50 to-white"
+              >
+                <div className="flex flex-col gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center text-xl group-hover:scale-110 transition-transform">
+                    🏪
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-sm text-indigo-900 mb-1">实景门店探店</h4>
+                    <p className="text-[10px] text-indigo-600/80 leading-tight">一键生成高质量门店漫游视频 (Sora-2)</p>
+                  </div>
+                </div>
+              </button>
+
+              {/* Card B: 爆款带货视频 */}
+              <button
+                onClick={() => setSoraDialogType('product')}
+                className="relative backdrop-blur-xl border border-purple-200 shadow-sm hover:shadow-md transition-all rounded-[24px] p-4 text-left group active:scale-[0.98] bg-gradient-to-br from-purple-50 to-white"
+              >
+                <div className="flex flex-col gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center text-xl group-hover:scale-110 transition-transform">
+                    🛍️
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-sm text-purple-900 mb-1">爆款带货视频</h4>
+                    <p className="text-[10px] text-purple-600/80 leading-tight">商品特写与细节展示视频 (Sora-2)</p>
+                  </div>
+                </div>
+              </button>
+            </div>
+
+            {/* Sora 视频对话框 */}
+            {soraDialogType && (
+              <SoraVideoDialog
+                isOpen={!!soraDialogType}
+                onClose={() => setSoraDialogType(null)}
+                type={soraDialogType}
               />
             )}
           </div>
