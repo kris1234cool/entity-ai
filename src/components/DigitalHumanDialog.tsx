@@ -73,11 +73,11 @@ const SSML_TOOLS = [
   { label: '💡思', tag: '[思考]', title: '插入思考停顿' },
 ];
 
-export default function DigitalHumanDialog({ 
-  isOpen, 
-  onClose, 
-  initialText = '', 
-  userId 
+export default function DigitalHumanDialog({
+  isOpen,
+  onClose,
+  initialText = '',
+  userId
 }: DigitalHumanDialogProps) {
   const [text, setText] = useState(initialText);
   const [assets, setAssets] = useState<DigitalAssets | null>(null);
@@ -87,19 +87,19 @@ export default function DigitalHumanDialog({
   const [generating, setGenerating] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  
+
   // 轮询相关状态
   const [isPolling, setIsPolling] = useState(false);
   const [finalVideoUrl, setFinalVideoUrl] = useState<string | null>(null);
   const [statusText, setStatusText] = useState('');
   const pollCountRef = useRef(0);
   const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
-  
+
   // 声音来源相关状态
   const [voiceSource, setVoiceSource] = useState<VoiceSource>('system'); // 默认使用系统音色
   const [activeCategory, setActiveCategory] = useState(VOICE_CATEGORIES[0].id);
   const [selectedSystemVoice, setSelectedSystemVoice] = useState(VOICE_CATEGORIES[0].voices[0].id);
-  
+
   const audioInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -118,15 +118,15 @@ export default function DigitalHumanDialog({
   const insertAtCursor = (insertText: string) => {
     const textarea = textareaRef.current;
     if (!textarea) return;
-    
+
     const start = textarea.selectionStart;
     const end = textarea.selectionEnd;
     const before = text.substring(0, start);
     const after = text.substring(end);
-    
+
     const newText = before + insertText + after;
     setText(newText);
-    
+
     // 恢复光标位置
     setTimeout(() => {
       textarea.focus();
@@ -137,27 +137,27 @@ export default function DigitalHumanDialog({
   // 一键智能润色：根据标点、关键词和段落结构自动插入情感标签
   const handleAutoPolish = () => {
     let polished = text.trim();
-    
+
     // 1. 段首强制增加 [吸气]
     if (!polished.startsWith('[吸气]')) {
       polished = '[吸气]' + polished;
     }
-    
+
     // 2. 在标点符号（，。！？）后插入 [停顿500ms]
     polished = polished.replace(/([，。！？,.!?])/g, '$1[停顿500ms]');
-    
+
     // 3. 逻辑词增强：识别关键词并在其后追加停顿
     const keywords = ['但是', '所以', '其实', '注意', '听好了', '尤其是', '特别注意'];
     keywords.forEach(word => {
       const reg = new RegExp(`(${word})(?!\\[停顿)`, 'g');
       polished = polished.replace(reg, '$1[停顿500ms]');
     });
-    
+
     // 4. 清理冗余标签 (防止重复点击导致标签堆叠)
     polished = polished.replace(/(\[停顿500ms\]){2,}/g, '[停顿500ms]');
-    
+
     setText(polished);
-    
+
     // 保持焦点
     setTimeout(() => textareaRef.current?.focus(), 0);
   };
@@ -201,7 +201,7 @@ export default function DigitalHumanDialog({
     try {
       const res = await fetch(`/api/check-task?taskId=${currentTaskId}`);
       const data = await res.json();
-      
+
       if (data.error) {
         throw new Error(data.error);
       }
@@ -224,7 +224,7 @@ export default function DigitalHumanDialog({
         pollCountRef.current += 1;
         const progress = Math.min(Math.round((pollCountRef.current / MAX_POLL_ATTEMPTS) * 100), 95);
         setStatusText(`视频生成中... ${progress}%`);
-        
+
         pollTimerRef.current = setTimeout(() => {
           pollTaskStatus(currentTaskId);
         }, POLL_INTERVAL);
@@ -273,7 +273,7 @@ export default function DigitalHumanDialog({
     setUploading('audio');
     setUploadProgress(0);
     setError(null);
-    
+
     try {
       // 1. 直传到 阿里云 OSS
       const filename = `uploads/audio_${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
@@ -282,20 +282,20 @@ export default function DigitalHumanDialog({
           setUploadProgress(Math.round(p * 100));
         }
       });
-      
+
       const audioUrl = `https://${process.env.NEXT_PUBLIC_OSS_BUCKET}.${process.env.NEXT_PUBLIC_OSS_REGION}.aliyuncs.com/${result.name}`;
       console.log('🎙️ OSS 音频上传成功:', audioUrl);
-      
+
       // 2. 调用 API 复刻声音
       const res = await fetch('/api/digital-assets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId, type: 'audio', url: audioUrl })
       });
-      
+
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      
+
       // 3. 刷新资产
       await loadAssets();
     } catch (err: unknown) {
@@ -316,32 +316,32 @@ export default function DigitalHumanDialog({
     setUploading('video');
     setUploadProgress(0);
     setError(null);
-    
+
     try {
       // 1. 直传到 阿里云 OSS (使用分片上传)
       const filename = `uploads/${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
-      
+
       const result = await ossClient.multipartUpload(filename, file, {
         progress: (p) => {
           setUploadProgress(Math.round(p * 100));
         }
       });
-      
+
       // 拼接公网 URL
       const videoUrl = `https://${process.env.NEXT_PUBLIC_OSS_BUCKET}.${process.env.NEXT_PUBLIC_OSS_REGION}.aliyuncs.com/${result.name}`;
       console.log('🎥 OSS 视频上传成功:', videoUrl);
-      
+
       // 2. 更新资产到数据库
       const res = await fetch('/api/digital-assets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId, type: 'video', url: videoUrl })
       });
-      
+
       const data = await res.json();
       console.log('💾 API响应:', data);
       if (data.error) throw new Error(data.error);
-      
+
       // 3. 刷新资产
       await loadAssets();
       console.log('✅ 资产已刷新');
@@ -359,14 +359,28 @@ export default function DigitalHumanDialog({
   // 下载视频 (处理跨域问题)
   const handleDownload = async () => {
     if (!finalVideoUrl) return;
-    
+
     try {
       setStatusText('正在准备下载...');
-      
+
+      // 🔒 检查 1: 确保使用 HTTPS
+      if (finalVideoUrl.startsWith('http://')) {
+        throw new Error('⚠️ 安全警告：视频 URL 使用 HTTP 协议，请联系开发者修改为 HTTPS');
+      }
+
       // 通过 fetch 获取视频
       const response = await fetch(finalVideoUrl);
+
+      // 🛑 检查 2: CORS 错误检测
+      if (!response.ok) {
+        if (response.status === 0 || response.type === 'opaque') {
+          throw new Error('CORS_ERROR');
+        }
+        throw new Error(`下载失败: HTTP ${response.status}`);
+      }
+
       const blob = await response.blob();
-      
+
       // 创建下载链接
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -374,15 +388,43 @@ export default function DigitalHumanDialog({
       a.download = `digital_video_${Date.now()}.mp4`;
       document.body.appendChild(a);
       a.click();
-      
+
       // 清理
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
       setStatusText('');
     } catch (err) {
       console.error('下载失败:', err);
-      // 如果 fetch 失败，尝试直接打开
-      window.open(finalVideoUrl, '_blank');
+
+      // 🎯 智能错误提示
+      if (err instanceof Error) {
+        if (err.message === 'CORS_ERROR' || err.message.includes('CORS')) {
+          setError(
+            '❌ 下载失败：跨域访问被阻止\n\n' +
+            '📋 解决步骤：\n' +
+            '1. 登录阿里云 OSS 控制台\n' +
+            '2. 找到您的 Bucket → 权限管理 → 跨域设置（CORS）\n' +
+            '3. 添加规则：允许来源 * | 方法 GET,HEAD\n\n' +
+            '💡 详细指南请查看项目文档'
+          );
+        } else if (err.message.includes('Failed to fetch') || err.name === 'TypeError') {
+          setError(
+            '❌ 下载失败：网络请求被阻止\n\n' +
+            '可能原因：\n' +
+            '1. OSS 未配置 CORS 跨域规则\n' +
+            '2. 视频 URL 使用了 HTTP 协议（需改为 HTTPS）\n' +
+            '3. 网络连接中断\n\n' +
+            '💡 正在尝试在新窗口打开视频...'
+          );
+          // 降级方案：新窗口打开
+          setTimeout(() => window.open(finalVideoUrl, '_blank'), 1000);
+        } else {
+          setError(`下载失败: ${err.message}`);
+        }
+      } else {
+        setError('下载失败，请稍后重试');
+      }
+
       setStatusText('');
     }
   };
@@ -426,7 +468,7 @@ export default function DigitalHumanDialog({
     handleReset();
     setGenerating(true);
     setStatusText('TTS 音频生成中...');
-    
+
     try {
       const res = await fetch('/api/generate-digital-video', {
         method: 'POST',
@@ -438,10 +480,10 @@ export default function DigitalHumanDialog({
           model: model
         })
       });
-      
+
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      
+
       const newTaskId = data.task_id || data.output?.task_id;
       setTaskId(newTaskId);
       // 轮询将由 useEffect 自动触发
@@ -477,18 +519,18 @@ export default function DigitalHumanDialog({
               <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg text-sm">
                 <p className="font-semibold">✅ 视频生成完成！</p>
               </div>
-              
+
               {/* 视频播放器 */}
               <div className="rounded-xl overflow-hidden bg-black">
-                <video 
-                  src={finalVideoUrl} 
-                  controls 
+                <video
+                  src={finalVideoUrl}
+                  controls
                   autoPlay
                   playsInline
                   className="w-full max-h-[400px]"
                 />
               </div>
-              
+
               {/* 操作按钮 */}
               <div className="flex gap-3">
                 <Button
@@ -576,21 +618,19 @@ export default function DigitalHumanDialog({
                 <div className="flex gap-2 p-1 bg-slate-100 rounded-xl">
                   <button
                     onClick={() => setVoiceSource('system')}
-                    className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-all ${
-                      voiceSource === 'system'
+                    className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-all ${voiceSource === 'system'
                         ? 'bg-white text-indigo-600 shadow-sm'
                         : 'text-slate-600 hover:text-slate-800'
-                    }`}
+                      }`}
                   >
                     🎧 系统推荐
                   </button>
                   <button
                     onClick={() => setVoiceSource('custom')}
-                    className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-all ${
-                      voiceSource === 'custom'
+                    className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-all ${voiceSource === 'custom'
                         ? 'bg-white text-purple-600 shadow-sm'
                         : 'text-slate-600 hover:text-slate-800'
-                    }`}
+                      }`}
                   >
                     📂 我的声音
                   </button>
@@ -606,11 +646,10 @@ export default function DigitalHumanDialog({
                       <button
                         key={cat.id}
                         onClick={() => setActiveCategory(cat.id)}
-                        className={`whitespace-nowrap flex-1 py-1.5 px-3 rounded-md text-xs font-medium transition-all ${
-                          activeCategory === cat.id
+                        className={`whitespace-nowrap flex-1 py-1.5 px-3 rounded-md text-xs font-medium transition-all ${activeCategory === cat.id
                             ? 'bg-white text-indigo-600 shadow-sm'
                             : 'text-slate-500 hover:text-slate-700'
-                        }`}
+                          }`}
                       >
                         {cat.label}
                       </button>
@@ -624,16 +663,14 @@ export default function DigitalHumanDialog({
                         <button
                           key={voice.id}
                           onClick={() => setSelectedSystemVoice(voice.id)}
-                          className={`relative flex flex-col items-center p-3 rounded-xl transition-all ${
-                            selectedSystemVoice === voice.id
+                          className={`relative flex flex-col items-center p-3 rounded-xl transition-all ${selectedSystemVoice === voice.id
                               ? 'bg-white border-2 border-indigo-500 shadow-md scale-[1.02]'
                               : 'bg-white/60 border border-slate-200/50 hover:bg-white hover:shadow-sm'
-                          }`}
+                            }`}
                         >
                           <span className="text-2xl mb-1">{voice.icon}</span>
-                          <p className={`text-xs font-bold truncate w-full text-center ${
-                            selectedSystemVoice === voice.id ? 'text-indigo-600' : 'text-slate-800'
-                          }`}>
+                          <p className={`text-xs font-bold truncate w-full text-center ${selectedSystemVoice === voice.id ? 'text-indigo-600' : 'text-slate-800'
+                            }`}>
                             {voice.name}
                           </p>
                           <div className="flex flex-wrap justify-center gap-1 mt-1">
@@ -682,8 +719,8 @@ export default function DigitalHumanDialog({
                         <span>{uploadProgress}%</span>
                       </div>
                       <div className="w-full bg-purple-100 rounded-full h-1.5">
-                        <div 
-                          className="bg-purple-600 h-1.5 rounded-full transition-all duration-300" 
+                        <div
+                          className="bg-purple-600 h-1.5 rounded-full transition-all duration-300"
                           style={{ width: `${uploadProgress}%` }}
                         ></div>
                       </div>
@@ -731,8 +768,8 @@ export default function DigitalHumanDialog({
                       <span>{uploadProgress}%</span>
                     </div>
                     <div className="w-full bg-slate-200 rounded-full h-1.5">
-                      <div 
-                        className="bg-indigo-600 h-1.5 rounded-full transition-all duration-300" 
+                      <div
+                        className="bg-indigo-600 h-1.5 rounded-full transition-all duration-300"
                         style={{ width: `${uploadProgress}%` }}
                       ></div>
                     </div>
