@@ -8,6 +8,7 @@ import ScriptGenerator from '@/components/ScriptGenerator';
 import ViralRewriteDialog from '@/components/ViralRewriteDialog';
 import DigitalHumanDialog from '@/components/DigitalHumanDialog';
 import SoraVideoDialog from '@/components/SoraVideoDialog'; // New
+import TaskHistory from '@/components/TaskHistory'; // New
 import { useAuth } from '@/components/auth/AuthWrapper';
 import { useProject } from '@/contexts/ProjectContext';
 import { useRouter } from 'next/navigation';
@@ -271,6 +272,15 @@ export default function Dashboard() {
                   </div>
                 </div>
               </button>
+            </div>
+
+            {/* 任务历史 */}
+            <div className="mt-12 border-t border-slate-200/60 pt-8">
+              <div className="flex items-center gap-2 mb-6">
+                <h3 className="text-lg font-bold text-slate-800">创作历史</h3>
+                <span className="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">Sora-2</span>
+              </div>
+              <TaskHistory />
             </div>
 
             {/* Sora 视频对话框 */}
